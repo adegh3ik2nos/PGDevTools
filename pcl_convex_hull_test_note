@@ -219,13 +219,45 @@ main(int argc, char** argv)
 
 #if 0
 
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+
+	// Fill in the cloud data  
+	cloud->width = 100;
+	cloud->height = 50;
+	cloud->points.resize(cloud->width * cloud->height);
+
+	// Generate the data  
+	{
+		size_t i;
+		for (i = 0; i < cloud->points.size()/2; ++i)
+		{
+			// 平面におく  
+			cloud->points[i].x = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
+			cloud->points[i].y = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
+			cloud->points[i].z = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
+			cloud->points[i].r = 255;
+			cloud->points[i].g = 255;
+			cloud->points[i].b = 255;
+		}
+		for (; i < cloud->points.size(); ++i)
+		{
+			// 平面におく  
+			cloud->points[i].x = 0.25 * rand() / (RAND_MAX + 1.0);
+			cloud->points[i].y = 0.25 * rand() / (RAND_MAX + 1.0);
+			cloud->points[i].z = 0.25 * rand() / (RAND_MAX + 1.0);
+			cloud->points[i].r = 255;
+			cloud->points[i].g = 255;
+			cloud->points[i].b = 255;
+		}
+	}
+
 	pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
 	tree->setInputCloud(cloud);
 	std::vector<pcl::PointIndices> cluster_indices;
 	pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
-	ec.setClusterTolerance(10); // 2cm 
+	ec.setClusterTolerance(0.1); // 2cm 
 	ec.setMinClusterSize(2);
-	ec.setMaxClusterSize(6);
+	ec.setMaxClusterSize(cloud->points.size());
 	ec.setSearchMethod(tree);
 	ec.setInputCloud(cloud);
 	ec.extract(cluster_indices);
@@ -249,6 +281,6 @@ main(int argc, char** argv)
 		}
 		++j;
 	}
-#else
+#endif
 
 }
