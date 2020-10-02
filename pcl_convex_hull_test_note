@@ -217,5 +217,38 @@ main(int argc, char** argv)
 
 
 
+#if 0
+
+	pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
+	tree->setInputCloud(cloud);
+	std::vector<pcl::PointIndices> cluster_indices;
+	pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
+	ec.setClusterTolerance(10); // 2cm 
+	ec.setMinClusterSize(2);
+	ec.setMaxClusterSize(6);
+	ec.setSearchMethod(tree);
+	ec.setInputCloud(cloud);
+	ec.extract(cluster_indices);
+
+	/*pcl::NormalEstimation<pcl::PointXYZRGB, pcl::Normal> ne;
+	ne.setInputCloud(cloud);
+	pcl::search::KdTree<pcl::PointXYZRGB>::Ptr treeNorm(new pcl::search::KdTree<pcl::PointXYZRGB>());
+	ne.setSearchMethod(treeNorm);
+	pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
+	ne.setRadiusSearch(0.03);
+	ne.compute(*cloud_normals);*/
+
+	int j = 0;
+	float colors[6][3] = { {255, 0, 0}, {0,255,0}, {0,0,255}, {255,255,0}, {0,255,255}, {255,0,255} };
+	for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
+	{
+		for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); pit++) {
+			cloud->points[*pit].r = colors[j % 6][0];
+			cloud->points[*pit].g = colors[j % 6][1];
+			cloud->points[*pit].b = colors[j % 6][2];
+		}
+		++j;
+	}
+#else
 
 }
