@@ -20,6 +20,7 @@
 #include <pcl/surface/convex_hull.h>
 #include "./rabv.hpp"
 #include <iostream>
+#include <cmath>
 
 template <typename ... Args>
 std::string format(const std::string& fmt, Args ... args)
@@ -32,43 +33,101 @@ std::string format(const std::string& fmt, Args ... args)
 
 using namespace std;
 
+void CreateOBB(const vector<pcl::PointXYZ>& vertices);
+
+using namespace pcl;
+
+float Length(const PointXYZ& v)
+{
+	return sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+}
+
 int
 main(int argc, char** argv)
 {
-	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
-
 	// Fill in the cloud data  
-	cloud->width = 50;
-	cloud->height = 50;
-	cloud->points.resize(cloud->width * cloud->height);
 
 	// Generate the data  
+	vector<pcl::PointXYZ> vertices;
+
+	PointXYZ samp[]
 	{
-		size_t i;
-		for (i = 0; i < cloud->points.size(); ++i)
-		{
-			// 平面におく  
-			cloud->points[i].x = 1024 * rand() / (RAND_MAX + 1.0);
-			cloud->points[i].y = 1024 * rand() / (RAND_MAX + 1.0);
-			cloud->points[i].z = 1024 * rand() / (RAND_MAX + 1.0);
-		}
+		PointXYZ(-150, 200, 0),
+		PointXYZ(-100, 200, 0),
+		PointXYZ(150, -200, 0),
+		PointXYZ(100, -200, 0)
+	};
+
+	for (const PointXYZ& p : samp)
+	{
+		vertices.push_back(p);
 	}
 
+	{
+		//vertices.resize(200);
 
+		//size_t i;
+		//for (i = 4; i < vertices.size() / 2; ++i)
+		//{
+		//	// 平面におく  
+		//	vertices[i].x = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
+		//	vertices[i].y = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
+		//	vertices[i].z = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
+		//}
+		//for (; i < vertices.size(); ++i)
+		//{
+		//	// 平面におく  
+		//	vertices[i].x = 0.25 * rand() / (RAND_MAX + 1.0);
+		//	vertices[i].y = 0.25 * rand() / (RAND_MAX + 1.0);
+		//	vertices[i].z = 0.25 * rand() / (RAND_MAX + 1.0);
+		//}
+	}
 
+	CreateOBB(vertices);
+#if 0
 
+	pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
+	tree->setInputCloud(cloud);
+	std::vector<pcl::PointIndices> cluster_indices;
+	pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
+	ec.setClusterTolerance(0.1); // 2cm 
+	ec.setMinClusterSize(2);
+	ec.setMaxClusterSize(cloud->points.size());
+	ec.setSearchMethod(tree);
+	ec.setInputCloud(cloud);
+	ec.extract(cluster_indices);
 
-/*
-	pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
-	pcl::PointIndices::Ptr inliers(new pcl::PointIndices);*/
-	// Create the segmentation object  
-	//pcl::SACSegmentation<pcl::PointXYZ> seg;
-	//// Optional  
-	//seg.setOptimizeCoefficients(true);
-	//// Mandatory  
-	//seg.setModelType(pcl::SACMODEL_PLANE);
-	//seg.setMethodType(pcl::SAC_RANSAC);
-	//seg.setDistanceThreshold(0.1);
+	/*pcl::NormalEstimation<pcl::PointXYZRGB, pcl::Normal> ne;
+	ne.setInputCloud(cloud);
+	pcl::search::KdTree<pcl::PointXYZRGB>::Ptr treeNorm(new pcl::search::KdTree<pcl::PointXYZRGB>());
+	ne.setSearchMethod(treeNorm);
+	pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
+	ne.setRadiusSearch(0.03);
+	ne.compute(*cloud_normals);*/
+
+	int j = 0;
+	float colors[6][3] = { {255, 0, 0}, {0,255,0}, {0,0,255}, {255,255,0}, {0,255,255}, {255,0,255} };
+	for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
+	{
+		for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); pit++) {
+			cloud->points[*pit].r = colors[j % 6][0];
+			cloud->points[*pit].g = colors[j % 6][1];
+			cloud->points[*pit].b = colors[j % 6][2];
+		}
+		++j;
+	}
+#elif 0
+	/*
+		pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
+		pcl::PointIndices::Ptr inliers(new pcl::PointIndices);*/
+		// Create the segmentation object  
+		//pcl::SACSegmentation<pcl::PointXYZ> seg;
+		//// Optional  
+		//seg.setOptimizeCoefficients(true);
+		//// Mandatory  
+		//seg.setModelType(pcl::SACMODEL_PLANE);
+		//seg.setMethodType(pcl::SAC_RANSAC);
+		//seg.setDistanceThreshold(0.1);
 
 	pcl::PointCloud<pcl::PointXYZ> hull;
 	std::vector<pcl::Vertices> polygons;
@@ -100,9 +159,9 @@ main(int argc, char** argv)
 			rabv::Lines line1;
 			line1.addLine(
 				hull[face1.vertices[j]], // Point (x, y, z) for "from"
-				hull[face1.vertices[(j + 1) %3]]  // Point (x, y, z) for "to"
+				hull[face1.vertices[(j + 1) % 3]]  // Point (x, y, z) for "to"
 			);
-			
+
 			rab->addLines(
 				format("line%d_%d", i, j), // Unique name of the lines
 				line1    // rabv::Lines
@@ -175,7 +234,6 @@ main(int argc, char** argv)
 	   // << coefficients->values[3] << std::endl;
 
 	//std::cerr << "Model inliers: " << inliers->indices.size() << std::endl;
-	//pcl::visualization::CloudViewer viewer("Cloud Viewer");
 
 	//int allSize = 0;
 	//for (int j = 0; j < idx; ++j)
@@ -196,13 +254,6 @@ main(int argc, char** argv)
 	   // }
 	   // s += pnts[j].size();
 	//}
-/*
-	viewer.showCloud(cloud->makeShared());
-
-	while (!viewer.wasStopped())
-	{
-
-	}*/
 
 	// 9. Visualze the rab data while the window is closed
 	const auto& viewer1 = rabv::Viewer::create(
@@ -211,76 +262,409 @@ main(int argc, char** argv)
 	);
 	viewer1->spinLoop();
 
+#endif
+
+
 
 
 	return (0);
 
 
 
-#if 0
 
-	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+}
 
-	// Fill in the cloud data  
-	cloud->width = 100;
-	cloud->height = 50;
-	cloud->points.resize(cloud->width * cloud->height);
+pcl::PointXYZ operator+(const pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
+{
+	return pcl::PointXYZ(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+}
+pcl::PointXYZ operator-(const pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
+{
+	return pcl::PointXYZ(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+}
 
-	// Generate the data  
+void operator+=(pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
+{
+	p1 = pcl::PointXYZ(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+}
+
+void operator/=(pcl::PointXYZ& p1, float s)
+{
+	p1 = pcl::PointXYZ(p1.x / s, p1.y / s, p1.z / s);
+}
+pcl::PointXYZ operator*(const pcl::PointXYZ& p1, float s)
+{
+	return pcl::PointXYZ(p1.x * s, p1.y * s, p1.z * s);
+}
+
+float Dot(const pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
+{
+	return p1.x * p2.x + p1.y * p2.y + p1.z * p2.z;
+}
+
+using Mat33 = vector<vector<float>>;
+
+class OBBTest
+{
+	float _max = 0.0001f;
+
+public:
+
+	vector<pcl::PointXYZ> _edges;
+	pcl::PointXYZ _origin;
+
+public:
+
+	void OnDrawGizmos(const vector<pcl::PointXYZ>& vertices)
 	{
-		size_t i;
-		for (i = 0; i < cloud->points.size()/2; ++i)
+		if (_edges.size() == 0)
 		{
-			// 平面におく  
-			cloud->points[i].x = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
-			cloud->points[i].y = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
-			cloud->points[i].z = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
-			cloud->points[i].r = 255;
-			cloud->points[i].g = 255;
-			cloud->points[i].b = 255;
+			return;
 		}
-		for (; i < cloud->points.size(); ++i)
+
+
+		auto rab = rabv::Rab::create();
+
+		pcl::PointXYZ from, to;
+
+		pcl::PointXYZ ftr = _origin + (_edges[0] * 0.5f) + (_edges[1] * 0.5f) + (_edges[2] * 0.5f);
+		pcl::PointXYZ fbr = ftr - _edges[2];
+		pcl::PointXYZ ftl = ftr - _edges[0];
+		pcl::PointXYZ fbl = ftl - _edges[2];
+
+		pcl::PointXYZ btr = ftr - _edges[1];
+		pcl::PointXYZ bbr = btr - _edges[2];
+		pcl::PointXYZ btl = btr - _edges[0];
+		pcl::PointXYZ bbl = btl - _edges[2];
+
+		rabv::Lines line1;
+		line1.addLine(ftr, fbr);
+		line1.addLine(ftr, ftl);
+		line1.addLine(ftl, fbl);
+		line1.addLine(fbl, fbr);
+		line1.addLine(btr, bbr);
+		line1.addLine(btr, btl);
+		line1.addLine(btl, bbl);
+		line1.addLine(bbl, bbr);
+		line1.addLine(ftr, btr);
+		line1.addLine(ftl, btl);
+		line1.addLine(fbr, bbr);
+		line1.addLine(fbl, bbl);
+		rab->addLines("line0", line1);
+
+		rabv::Lines smL;
+		smL.color = rabv::Color(255, 0, 0);
+		for(int i = 0; i < vertices.size(); ++i)
 		{
-			// 平面におく  
-			cloud->points[i].x = 0.25 * rand() / (RAND_MAX + 1.0);
-			cloud->points[i].y = 0.25 * rand() / (RAND_MAX + 1.0);
-			cloud->points[i].z = 0.25 * rand() / (RAND_MAX + 1.0);
-			cloud->points[i].r = 255;
-			cloud->points[i].g = 255;
-			cloud->points[i].b = 255;
+			smL.addLine(vertices[i], vertices[(i + 1)% vertices.size()]);
 		}
+		rab->addLines("sample2", smL);
+
+		{
+			pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+
+			cloud->points.resize(vertices.size());
+
+			for (int i = 0; i < vertices.size(); ++i)
+			{
+				cloud->points[i] = vertices[i];
+			}
+			rab->addCloud(
+				"sample1",   // ユニークな名前
+				cloud // pcl::PointCloud<pcl::PointXYZ>::Ptrな点群データ
+			);
+		}
+
+
+		// 9. Visualze the rab data while the window is closed
+		const auto& viewer1 = rabv::Viewer::create(
+			"Viewer1",	// Title of viewer
+			rab			// Rab data
+		);
+		viewer1->spinLoop();
 	}
 
-	pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
-	tree->setInputCloud(cloud);
-	std::vector<pcl::PointIndices> cluster_indices;
-	pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
-	ec.setClusterTolerance(0.1); // 2cm 
-	ec.setMinClusterSize(2);
-	ec.setMaxClusterSize(cloud->points.size());
-	ec.setSearchMethod(tree);
-	ec.setInputCloud(cloud);
-	ec.extract(cluster_indices);
-
-	/*pcl::NormalEstimation<pcl::PointXYZRGB, pcl::Normal> ne;
-	ne.setInputCloud(cloud);
-	pcl::search::KdTree<pcl::PointXYZRGB>::Ptr treeNorm(new pcl::search::KdTree<pcl::PointXYZRGB>());
-	ne.setSearchMethod(treeNorm);
-	pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
-	ne.setRadiusSearch(0.03);
-	ne.compute(*cloud_normals);*/
-
-	int j = 0;
-	float colors[6][3] = { {255, 0, 0}, {0,255,0}, {0,0,255}, {255,255,0}, {0,255,255}, {255,0,255} };
-	for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
+	void CalcEdges(const vector<pcl::PointXYZ>& vertices)
 	{
-		for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); pit++) {
-			cloud->points[*pit].r = colors[j % 6][0];
-			cloud->points[*pit].g = colors[j % 6][1];
-			cloud->points[*pit].b = colors[j % 6][2];
-		}
-		++j;
-	}
-#endif
 
+
+		Mat33 eigenVectors = GetEigenVectors(CollectMatrix(vertices));
+
+		int rank = 2;
+
+		pcl::PointXYZ vec1, vec2, vec3;
+		{
+			float x = eigenVectors[0][0];
+			float y = eigenVectors[1][0];
+			float z = eigenVectors[2][0];
+
+			vec1 = pcl::PointXYZ(x, y, z);
+		}
+		{
+			float x = eigenVectors[0][1];
+			float y = eigenVectors[1][1];
+			float z = eigenVectors[2][1];
+
+			vec2 = pcl::PointXYZ(x, y, z);
+		}
+		{
+			float x = eigenVectors[0][2];
+			float y = eigenVectors[1][2];
+			float z = eigenVectors[2][2];
+
+			vec3 = pcl::PointXYZ(x, y, z);
+		}
+
+		// 全頂点に対して内積を取り、最小値・最大値を計算する
+		float min1 = FLT_MAX;
+		float min2 = FLT_MAX;
+		float min3 = FLT_MAX;
+		float max1 = FLT_MIN;
+		float max2 = FLT_MIN;
+		float max3 = FLT_MIN;
+
+		for (int i = 0; i < vertices.size(); i++)
+		{
+			pcl::PointXYZ pos = vertices[i];
+			float dot1 = Dot(vec1, pos);
+			if (dot1 > max1)
+			{
+				max1 = dot1;
+			}
+			if (dot1 < min1)
+			{
+				min1 = dot1;
+			}
+
+			float dot2 = Dot(vec2, pos);
+			if (dot2 > max2)
+			{
+				max2 = dot2;
+			}
+			if (dot2 < min2)
+			{
+				min2 = dot2;
+			}
+
+			float dot3 = Dot(vec3, pos);
+			if (dot3 > max3)
+			{
+				max3 = dot3;
+			}
+			if (dot3 < min3)
+			{
+				min3 = dot3;
+			}
+		}
+
+		float len1 = max1 - min1;
+		float len2 = max2 - min2;
+		float len3 = max3 - min3;
+
+		pcl::PointXYZ edge1 = vec1 * len1;
+		pcl::PointXYZ edge2 = vec2 * len2;
+		pcl::PointXYZ edge3 = vec3 * len3;
+
+		_edges = { edge1, edge2, edge3 };
+
+		pcl::PointXYZ center1 = (vec1 * (max1 + min1)) * 0.5f;
+		pcl::PointXYZ center2 = (vec2 * (max2 + min2)) * 0.5f;
+		pcl::PointXYZ center3 = (vec3 * (max3 + min3)) * 0.5f;
+
+		_origin = center1 + center2 + center3;
+	}
+
+	Mat33 CollectMatrix(vector<pcl::PointXYZ> vertices)
+	{
+		// 各成分の平均を計算
+		pcl::PointXYZ m(0, 0, 0);
+
+		for (int i = 0; i < vertices.size(); i++)
+		{
+			m += vertices[i];
+		}
+
+		m /= vertices.size();
+
+		float c11 = 0; float c22 = 0; float c33 = 0;
+		float c12 = 0; float c13 = 0; float c23 = 0;
+
+		for (int i = 0; i < vertices.size(); i++)
+		{
+			c11 += (vertices[i].x - m.x) * (vertices[i].x - m.x);
+			c22 += (vertices[i].y - m.y) * (vertices[i].y - m.y);
+			c33 += (vertices[i].z - m.z) * (vertices[i].z - m.z);
+
+			c12 += (vertices[i].x - m.x) * (vertices[i].y - m.y);
+			c13 += (vertices[i].x - m.x) * (vertices[i].z - m.z);
+			c23 += (vertices[i].y - m.y) * (vertices[i].z - m.z);
+		}
+
+		c11 /= vertices.size();
+		c22 /= vertices.size();
+		c33 /= vertices.size();
+		c12 /= vertices.size();
+		c13 /= vertices.size();
+		c23 /= vertices.size();
+
+		Mat33 matrix =
+		{
+			{ c11, c12, c13 },
+			{ c12, c22, c23 },
+			{ c13, c23, c33 },
+		};
+
+		return matrix;
+	}
+
+	/// 
+
+	/// 行列の中の絶対値の最大値とその位置を返す
+	/// 
+
+	/// 評価する行列
+	/// 最大値の行位置
+	/// 最大値の列位置
+	/// 最大値
+	float GetMaxValue(Mat33 matrix, int& p, int& q)
+	{
+		p = 0;
+		q = 0;
+
+		int rank = 2;
+
+		float max = FLT_MIN;
+
+		for (int i = 0; i < rank; i++)
+		{
+			int len = 3;
+
+			for (int j = 0; j < len; j++)
+			{
+				// 対角成分は評価しない
+				if (i == j)
+				{
+					continue;
+				}
+
+				float absmax = abs(matrix[i][j]);
+				if (max <= absmax)
+				{
+					max = absmax;
+					p = i;
+					q = j;
+				}
+			}
+		}
+
+		if (p > q)
+		{
+			int temp = p;
+			p = q;
+			q = temp;
+		}
+
+		return max;
+	}
+
+	/// 
+
+	/// 固有ベクトルを得る
+	/// 
+
+	/// 評価する行列
+	Mat33 GetEigenVectors(Mat33 matrix)
+	{
+		// 固有ベクトルのための行列を正規化
+		Mat33 eigenVectors;
+
+		eigenVectors.resize(3);
+		for (int i = 0; i < 3; i++)
+		{
+			eigenVectors[i].resize(3);
+			for (int j = 0; j < 3; j++)
+			{
+				if (i == j)
+				{
+					eigenVectors[i][j] = 1.f;
+				}
+				else
+				{
+					eigenVectors[i][j] = 0;
+				}
+			}
+		}
+
+		int limit = 100;
+		int count = 0;
+		int p, q;
+		while (true)
+		{
+			count++;
+
+			if (count >= limit)
+			{
+				break;
+			}
+
+			float max = GetMaxValue(matrix, p, q);
+			if (max <= _max)
+			{
+				break;
+			}
+
+			float app = matrix[p][p];
+			float apq = matrix[p][q];
+			float aqq = matrix[q][q];
+
+			float alpha = (app - aqq) / 2.f;
+			float beta = -apq;
+			float gamma = abs(alpha) / sqrt(alpha * alpha + beta * beta);
+
+			float sin = sqrt((1.f - gamma) / 2.f);
+			float cos = sqrt((1.f + gamma) / 2.f);
+
+			if (alpha * beta < 0)
+			{
+				sin = -sin;
+			}
+
+			for (int i = 0; i < 3; i++)
+			{
+				float temp = cos * matrix[p][i] - sin * matrix[q][i];
+				matrix[q][i] = sin * matrix[p][i] + cos * matrix[q][i];
+				matrix[p][i] = temp;
+			}
+
+			for (int i = 0; i < 3; i++)
+			{
+				matrix[i, p] = matrix[p, i];
+				matrix[i, q] = matrix[q, i];
+			}
+
+			matrix[p][p] = cos * cos * app + sin * sin * aqq - 2 * sin * cos * apq;
+			matrix[p][q] = sin * cos * (app - aqq) + (cos * cos - sin * sin) * apq;
+			matrix[q][p] = sin * cos * (app - aqq) + (cos * cos - sin * sin) * apq;
+			matrix[q][q] = sin * sin * app + cos * cos * aqq + 2 * sin * cos * apq;
+
+			for (int i = 0; i < 3; i++)
+			{
+				float temp = cos * eigenVectors[i][p] - sin * eigenVectors[i][q];
+				eigenVectors[i][q] = sin * eigenVectors[i][p] + cos * eigenVectors[i][q];
+				eigenVectors[i][p] = temp;
+			}
+		}
+
+		return eigenVectors;
+	}
+};
+
+void CreateOBB(const vector<pcl::PointXYZ>& vertices)
+{
+	OBBTest test;
+
+	test.CalcEdges(vertices);
+
+
+	test.OnDrawGizmos(vertices);
 }
