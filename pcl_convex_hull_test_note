@@ -22,6 +22,81 @@
 #include <iostream>
 #include <cmath>
 
+using namespace std;
+using namespace pcl;
+
+pcl::PointXYZ operator+(const pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
+{
+	return pcl::PointXYZ(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+}
+pcl::PointXYZ operator-(const pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
+{
+	return pcl::PointXYZ(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+}
+
+void operator+=(pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
+{
+	p1 = pcl::PointXYZ(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+}
+
+PointXYZ operator/(const pcl::PointXYZ& p1, float s)
+{
+	return pcl::PointXYZ(p1.x / s, p1.y / s, p1.z / s);
+}
+void operator/=(pcl::PointXYZ& p1, float s)
+{
+	p1 = pcl::PointXYZ(p1.x / s, p1.y / s, p1.z / s);
+}
+pcl::PointXYZ operator*(const pcl::PointXYZ& p1, float s)
+{
+	return pcl::PointXYZ(p1.x * s, p1.y * s, p1.z * s);
+}
+
+float Dot(const pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
+{
+	return p1.x * p2.x + p1.y * p2.y + p1.z * p2.z;
+}
+
+struct Poly
+{
+	int idx[3];
+
+	bool GetShareLine(const Poly& poly, vector<int>& indices)
+	{
+		for (int i = 0; i < 3; ++i)
+		{
+			for (int j = 0; j < 3; ++j)
+			{
+				if (idx[i] == poly.idx[j])
+				{
+					indices.push_back(idx[i]);
+					break;
+				}
+			}
+		}
+
+		return 2 <= indices.size();
+	}
+};
+struct Point
+{
+	pcl::PointXYZ pos;
+
+	Point(pcl::PointXYZ _pos)
+		: pos(_pos)
+	{
+	}
+};
+struct Cluster
+{
+	vector<Poly> polys;
+	double e;
+};
+struct AdLine
+{
+	pcl::PointXYZ pos[2];
+};
+
 template <typename ... Args>
 std::string format(const std::string& fmt, Args ... args)
 {
@@ -31,9 +106,9 @@ std::string format(const std::string& fmt, Args ... args)
 	return std::string(&buf[0], &buf[0] + len);
 }
 
-using namespace std;
 
 void CreateOBB(const vector<pcl::PointXYZ>& vertices);
+void TestDraw(const vector<Point>& vertices, const vector<Cluster>& clustVec, const vector<AdLine>& adLine);
 
 using namespace pcl;
 
@@ -42,48 +117,243 @@ float Length(const PointXYZ& v)
 	return sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
 }
 
+PointXYZ Normalize(const PointXYZ& v)
+{
+	return v / Length(v);
+}
+
+bool IsCrossParallelLine(PointXYZ& s, PointXYZ& e, 
+	const PointXYZ& p00, const PointXYZ& p01, const PointXYZ& p10, const PointXYZ& p11)
+{
+	constexpr float TMP_EPSILON = 0.05;
+
+	PointXYZ d0 = p01 - p00;
+	float d0_len = Length(d0);
+	PointXYZ d0_n = d0 / d0_len;
+
+	float nddot = Dot(d0_n, Normalize(p11 - p10));
+
+	//ほぼ平行な場合
+	if ((1.f + TMP_EPSILON >= nddot && 1.f - TMP_EPSILON <= nddot)
+		|| (-1.f - TMP_EPSILON <= nddot && -1.f + TMP_EPSILON >= nddot))
+	{
+		constexpr int tsize = 4;
+		pair<float, int> ts[tsize]{ {0, 0}, {1, 1}, {0, 2}, {0, 3} };
+		PointXYZ vp = p10 - p00;
+		ts[2].first = Dot(d0_n, vp) / d0_len;
+
+		//ほぼ重なる場合
+		if (TMP_EPSILON >= Length(d0 * ts[2].first - vp))
+		{
+			ts[3].first = Dot(d0_n, p11 - p00) / d0_len;
+
+			sort(ts, ts + tsize, [](pair<float, int> i0, pair<float, int> i1) {return i0.first < i1.first; });
+
+			//交差する
+			if (1 != abs(ts[0].second - ts[1].second) && TMP_EPSILON <= abs(ts[1].first - ts[2].first))
+			{
+				s = p00 + d0 * ts[1].first;
+				e = p00 + d0 * ts[2].first;
+
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+double Func_E(const Cluster& c, const vector<Point>& vertices)
+{
+	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+
+	cloud->points.resize(c.polys.size() * 3);
+	for (int i = 0; i < c.polys.size(); ++i)
+	{
+		pcl::PointXYZ xyz_i0 = vertices[c.polys[i].idx[0]].pos;
+		pcl::PointXYZ xyz_i1 = vertices[c.polys[i].idx[1]].pos;
+		pcl::PointXYZ xyz_i2 = vertices[c.polys[i].idx[2]].pos;
+
+		cloud->points[i * 3 + 0] = xyz_i0;
+		cloud->points[i * 3 + 1] = xyz_i1;
+		cloud->points[i * 3 + 2] = xyz_i2;
+	}
+
+	pcl::PointCloud<pcl::PointXYZ> hull;
+	std::vector<pcl::Vertices> polygons;
+
+	pcl::ConvexHull<pcl::PointXYZ> chull;
+	chull.setInputCloud(cloud);
+	chull.setDimension(2);
+	chull.setComputeAreaVolume(true);
+	chull.reconstruct(hull, polygons);
+	double e = chull.getTotalArea();
+
+	double vol = chull.getTotalVolume();
+	assert(vol <= 0);
+
+
+	return e;
+}
+
 int
 main(int argc, char** argv)
 {
 	// Fill in the cloud data  
 
 	// Generate the data  
-	vector<pcl::PointXYZ> vertices;
+	vector<Point> vertices;
+	vector<Poly> polys;
 
 	PointXYZ samp[]
 	{
-		PointXYZ(-150, 200, 0),
-		PointXYZ(-100, 200, 0),
-		PointXYZ(150, -200, 0),
-		PointXYZ(100, -200, 0)
+		PointXYZ(-100, -70, 0),
+		PointXYZ(-20, -70, 0),
+		PointXYZ(-20, 55, 0),
+		PointXYZ(-100, 55, 0),
+
+		PointXYZ(-20, -40, 0),
+		PointXYZ(80, -40, 0),
+		PointXYZ(-20, 60, 0),
+		PointXYZ(80, 60, 0),
+
+		PointXYZ(-40, 100, 0),
+		PointXYZ(-40, 60, 0),
+		PointXYZ(0, 100, 0),
+		PointXYZ(0, 80, 0),
+
+		PointXYZ(60, 80, 0),
+		PointXYZ(60, 100, 0),
+		PointXYZ(100, 100, 0),
+		PointXYZ(100, 60, 0),
 	};
-
-	for (const PointXYZ& p : samp)
+	for (const PointXYZ& v : samp)
 	{
-		vertices.push_back(p);
+		vertices.emplace_back(v);
+	}
+	
+	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+	cloud->points.resize(vertices.size());
+	for (int i = 0; i < vertices.size(); ++i)
+	{
+		cloud->points[i] = vertices[i].pos;
 	}
 
+	Poly samp2[]
 	{
-		//vertices.resize(200);
+		{0, 1, 2},
+		{0, 2, 3},
 
-		//size_t i;
-		//for (i = 4; i < vertices.size() / 2; ++i)
-		//{
-		//	// 平面におく  
-		//	vertices[i].x = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
-		//	vertices[i].y = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
-		//	vertices[i].z = 0.25 * rand() / (RAND_MAX + 1.0) + 0.75;
-		//}
-		//for (; i < vertices.size(); ++i)
-		//{
-		//	// 平面におく  
-		//	vertices[i].x = 0.25 * rand() / (RAND_MAX + 1.0);
-		//	vertices[i].y = 0.25 * rand() / (RAND_MAX + 1.0);
-		//	vertices[i].z = 0.25 * rand() / (RAND_MAX + 1.0);
-		//}
+		{4, 5, 6},
+		{5, 6, 7},
+
+		{8, 9, 10},
+		{9, 10, 6},
+		{6, 10, 11},
+
+		{6, 7, 11},
+		{7, 11, 12},
+
+		{7, 12, 13},
+		{7, 13, 15},
+		{13, 14, 15},
+	};
+	for (const Poly& p : samp2)
+	{
+		polys.push_back(p);
 	}
 
-	CreateOBB(vertices);
+	vector<Cluster> clustVec;
+	clustVec.resize(polys.size());
+	for(int i = 0; i < clustVec.size(); ++i)
+	{
+		clustVec[i].polys.push_back(polys[i]);
+		clustVec[i].e = Func_E(clustVec[i], vertices);
+	}
+
+
+	{
+		constexpr double lim_sub_e = 0.05;
+
+		int curIdx = 0;
+		while (curIdx < clustVec.size())
+		{
+			double min_e = lim_sub_e + 0.1;
+			int min_idx = -1;
+
+			for (int cl = curIdx + 1; cl < clustVec.size(); ++cl)
+			{
+				Cluster tmpClust = clustVec[curIdx];
+				std::copy(clustVec[cl].polys.begin(), clustVec[cl].polys.end(), std::back_inserter(tmpClust.polys));
+
+
+				tmpClust.e = Func_E(tmpClust, vertices);
+				double sub_e = max(tmpClust.e - (clustVec[curIdx].e + clustVec[cl].e), 0.0);
+
+				if (min_e > sub_e)
+				{
+					min_e = sub_e;
+					min_idx = cl;
+				}
+			}
+
+			if (0 < min_idx && min_e <= lim_sub_e)
+			{
+				std::copy(clustVec[min_idx].polys.begin(), clustVec[min_idx].polys.end(), std::back_inserter(clustVec[curIdx].polys));
+				clustVec.erase(clustVec.begin() + min_idx);
+
+				clustVec[curIdx].e = Func_E(clustVec[curIdx], vertices);
+			}
+			else
+			{
+				++curIdx;
+			}
+		}
+	}
+
+	vector<AdLine> adLines;
+	{
+		for (int cl1 = 0; cl1 < clustVec.size(); ++cl1)
+		{
+			for (int cl2 = cl1 + 1; cl2 < clustVec.size(); ++cl2)
+			{
+				for (int p1 = 0; p1 < clustVec[cl1].polys.size(); ++p1)
+				{
+					for (int p2 = 0; p2 < clustVec[cl2].polys.size(); ++p2)
+					{
+						//vector<int> indices;
+						//if (clustVec[cl1].polys[p1].GetShareLine(clustVec[cl2].polys[p2], indices))//別のクラスタで共有点が2つ以上の所はポータルとなる線
+						//{
+						//	adLines.push_back({ vertices[indices[0]].pos, vertices[indices[1]].pos });
+						//}
+
+						const Poly& poly1 = clustVec[cl1].polys[p1];
+						const Poly& poly2 = clustVec[cl2].polys[p2];
+
+						for (int i = 0; i < 3; ++i)
+						{
+							for (int j = 0; j < 3; ++j)
+							{
+								PointXYZ p00 = vertices[poly1.idx[i]].pos;
+								PointXYZ p01 = vertices[poly1.idx[(i + 1) % 3]].pos;
+								PointXYZ p10 = vertices[poly2.idx[j]].pos;
+								PointXYZ p11 = vertices[poly2.idx[(j + 1) % 3]].pos;
+
+								PointXYZ s, e;
+								if (IsCrossParallelLine(s, e, p00, p01, p10, p11))
+								{
+									adLines.push_back({ s, e });
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	TestDraw(vertices, clustVec, adLines);
+	//CreateOBB(vertices);
 #if 0
 
 	pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
@@ -274,32 +544,51 @@ main(int argc, char** argv)
 
 }
 
-pcl::PointXYZ operator+(const pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
+void TestDraw(const vector<Point>& vertices, const vector<Cluster>& clustVec, const vector<AdLine>& adLine)
 {
-	return pcl::PointXYZ(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
-}
-pcl::PointXYZ operator-(const pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
-{
-	return pcl::PointXYZ(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
-}
+	auto rab = rabv::Rab::create();
 
-void operator+=(pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
-{
-	p1 = pcl::PointXYZ(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
-}
+	rabv::Color colors[]
+	{
+		rabv::Color(100, 65, 65), 
+		rabv::Color(0, 255, 0), 
+		rabv::Color(0, 0, 255),
+		rabv::Color(128, 128, 0), 
+		rabv::Color(0, 128, 128),
+		rabv::Color(255, 255, 255),
+		rabv::Color(255, 0, 255),
+		rabv::Color(128, 0, 0),
+	};
 
-void operator/=(pcl::PointXYZ& p1, float s)
-{
-	p1 = pcl::PointXYZ(p1.x / s, p1.y / s, p1.z / s);
-}
-pcl::PointXYZ operator*(const pcl::PointXYZ& p1, float s)
-{
-	return pcl::PointXYZ(p1.x * s, p1.y * s, p1.z * s);
-}
+	for (int cl = 0; cl < clustVec.size(); ++cl)
+	{
+		rabv::Lines edges;
+		edges.color = colors[cl % (sizeof(colors) / sizeof(colors[0]))];
+		for (const Poly& p : clustVec[cl].polys)
+		{
+			edges.addLine(vertices[p.idx[0]].pos, vertices[p.idx[1]].pos);
+			edges.addLine(vertices[p.idx[1]].pos, vertices[p.idx[2]].pos);
+			edges.addLine(vertices[p.idx[0]].pos, vertices[p.idx[2]].pos);
+		}
+		rab->addLines(format("edges%d", cl), edges);
+	}
 
-float Dot(const pcl::PointXYZ& p1, const pcl::PointXYZ& p2)
-{
-	return p1.x * p2.x + p1.y * p2.y + p1.z * p2.z;
+	{
+		rabv::Lines edges;
+		edges.color = rabv::Color(255, 0, 0);
+		for (const AdLine& l : adLine)
+		{
+			edges.addLine(l.pos[0], l.pos[1]);
+		}
+		rab->addLines("edges99", edges);
+	}
+
+	// 9. Visualze the rab data while the window is closed
+	const auto& viewer1 = rabv::Viewer::create(
+		"Viewer1",	// Title of viewer
+		rab			// Rab data
+	);
+	viewer1->spinLoop();
 }
 
 using Mat33 = vector<vector<float>>;
@@ -351,6 +640,13 @@ public:
 		line1.addLine(fbr, bbr);
 		line1.addLine(fbl, bbl);
 		rab->addLines("line0", line1);
+
+		rabv::Lines line2;
+		line2.color = rabv::Color(0, 255, 0);
+		line2.addLine(_origin, _origin + (_edges[0] * 0.5f));
+		line2.addLine(_origin, _origin + (_edges[1] * 0.5f));
+		line2.addLine(_origin, _origin + (_edges[2] * 0.5f));
+		rab->addLines("line1", line2);
 
 		rabv::Lines smL;
 		smL.color = rabv::Color(255, 0, 0);
