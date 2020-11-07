@@ -1,9 +1,9 @@
-#include "Math/Matrix44.h"
+#include "src/Math/Matrix44.h"
 
 #include <memory>
 
-#include "Math/Vector3.h"
-#include "Math/Math.h"
+#include "src/Math/Vector3.h"
+#include "src/Math/Math.h"
 
 namespace Math {
 

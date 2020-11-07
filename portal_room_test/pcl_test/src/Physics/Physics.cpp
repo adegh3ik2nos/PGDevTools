@@ -1,9 +1,9 @@
-#include "Physics/Physics.h"
+#include "src/Physics/Physics.h"
 
-#include "Physics/CollisionModel.h"
-#include "Math/Math.h"
-#include "Math/Matrix44.h"
-#include "Math/Vector3.h"
+#include "src/Physics/CollisionModel.h"
+#include "src/Math/Math.h"
+#include "src/Math/Matrix44.h"
+#include "src/Math/Vector3.h"
 
 using namespace Math;
 
@@ -370,6 +370,13 @@ namespace Physics {
 			a.mMin.z <= b.mMax.z && a.mMax.z >= b.mMin.z;
 		return hit;
 	}
+	//ì_Ç∆OBB
+	bool Point_HitCheck_OBB(
+		const Math::Vector3& p, const OBB& obb)
+	{
+		//àÍâûåÎç∑ä‹Çﬁ
+		return (0.f + FLT_EPSILON) >= ShortLen_Of_Point_And_OBB(p, obb);
+	}
 	bool Sphere_HitCheck_OBB(
 		const Sphere& sp, const OBB& obb) {
 		//ç≈íZãóó£Ç™ãÖÇÃîºåaà»â∫Ç»ÇÁè’ìÀ
@@ -510,6 +517,74 @@ namespace Physics {
 		//ï™ó£ïΩñ Ç™Ç»ÇØÇÍÇŒìñÇΩÇ¡ÇƒÇ¢ÇÈ
 		return true;
 	}
+
+
+	//OBBÇ™AABBÇ…ä‹Ç‹ÇÍÇÈÇ©
+	bool OBB_Contains_AABB(const OBB& obb, const AABB& aabb)
+	{
+		Math::Vector3 _edges[3]{ Math::Vector3(obb.mHalfSize.x * 2.f, 0, 0), Math::Vector3(0, obb.mHalfSize.y * 2.f, 0), Math::Vector3(0, 0, obb.mHalfSize.z * 2.f) };
+		_edges[0] *= obb.mRot;
+		_edges[1] *= obb.mRot;
+		_edges[2] *= obb.mRot;
+		Math::Vector3 _origin = obb.mPos;
+
+		Math::Vector3 ftr = _origin + (_edges[0] * 0.5f) + (_edges[1] * 0.5f) + (_edges[2] * 0.5f);
+		Math::Vector3 fbr = ftr - _edges[2];
+		Math::Vector3 ftl = ftr - _edges[0];
+		Math::Vector3 fbl = ftl - _edges[2];
+
+		Math::Vector3 btr = ftr - _edges[1];
+		Math::Vector3 bbr = btr - _edges[2];
+		Math::Vector3 btl = btr - _edges[0];
+		Math::Vector3 bbl = btl - _edges[2];
+
+		bool isHit = true;
+		isHit &= Point_HitCheck_AABB(ftr, aabb);
+		isHit &= Point_HitCheck_AABB(fbr, aabb);
+		isHit &= Point_HitCheck_AABB(ftl, aabb);
+		isHit &= Point_HitCheck_AABB(fbl, aabb);
+
+		isHit &= Point_HitCheck_AABB(btr, aabb);
+		isHit &= Point_HitCheck_AABB(bbr, aabb);
+		isHit &= Point_HitCheck_AABB(btl, aabb);
+		isHit &= Point_HitCheck_AABB(bbl, aabb);
+
+		return isHit;
+	}
+
+	//aÇ™bÇ…ä‹Ç‹ÇÍÇÈÇ©
+	bool OBB_Contains_OBB(const OBB& a, const OBB& b)
+	{
+		Math::Vector3 _edges[3]{ Math::Vector3(a.mHalfSize.x * 2.f, 0, 0), Math::Vector3(0, a.mHalfSize.y * 2.f, 0), Math::Vector3(0, 0, a.mHalfSize.z * 2.f) };
+		_edges[0] *= a.mRot * b.mIvsRot;
+		_edges[1] *= a.mRot * b.mIvsRot;
+		_edges[2] *= a.mRot * b.mIvsRot;
+		Math::Vector3 _origin = a.mPos;
+
+		Math::Vector3 ftr = _origin + (_edges[0] * 0.5f) + (_edges[1] * 0.5f) + (_edges[2] * 0.5f);
+		Math::Vector3 fbr = ftr - _edges[2];
+		Math::Vector3 ftl = ftr - _edges[0];
+		Math::Vector3 fbl = ftl - _edges[2];
+
+		Math::Vector3 btr = ftr - _edges[1];
+		Math::Vector3 bbr = btr - _edges[2];
+		Math::Vector3 btl = btr - _edges[0];
+		Math::Vector3 bbl = btl - _edges[2];
+
+		bool isHit = true;
+		isHit &= Point_HitCheck_OBB(ftr, b);
+		isHit &= Point_HitCheck_OBB(fbr, b);
+		isHit &= Point_HitCheck_OBB(ftl, b);
+		isHit &= Point_HitCheck_OBB(fbl, b);
+
+		isHit &= Point_HitCheck_OBB(btr, b);
+		isHit &= Point_HitCheck_OBB(bbr, b);
+		isHit &= Point_HitCheck_OBB(btl, b);
+		isHit &= Point_HitCheck_OBB(bbl, b);
+
+		return isHit;
+	}
+
 
 	//â^ìÆÉÇÉfÉã
 	void Rebound_Exercise(

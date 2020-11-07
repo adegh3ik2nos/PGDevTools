@@ -1,6 +1,6 @@
-#include "Math/Vector2.h"
+#include "src/Math/Vector2.h"
 
-#include "Math/Math.h"
+#include "src/Math/Math.h"
 
 namespace Math {
 

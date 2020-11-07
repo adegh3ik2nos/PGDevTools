@@ -1,8 +1,8 @@
 #ifndef INCLUDED_PHYSICS_PHYSICS_H
 #define INCLUDED_PHYSICS_PHYSICS_H
 
-#include "Math/Vector2.h"
-#include "Math/Vector3.h"
+#include "src/Math/Vector2.h"
+#include "src/Math/Vector3.h"
 
 namespace Physics {
 	class Sphere;
@@ -10,10 +10,6 @@ namespace Physics {
 	class TriPlane;
 	class AABB;
 	class OBB;
-}
-namespace Math
-{
-	class Vector3;
 }
 
 namespace Physics {
@@ -88,6 +84,9 @@ namespace Physics {
 	//AABB‚ÆAABB
 	bool AABB_HitCheck_AABB(
 		const AABB& a, const AABB& b);
+	//“_‚ÆOBB
+	bool Point_HitCheck_OBB(
+		const Math::Vector3& p, const OBB& obb);
 	//‹…‚ÆOBB
 	bool Sphere_HitCheck_OBB(
 		const Sphere& sp, const OBB& obb);
@@ -100,6 +99,11 @@ namespace Physics {
 	//OBB‚ÆOBB
 	bool OBB_HitCheck_OBB(
 		const OBB& a, const OBB& b);
+
+	//OBB‚ªAABB‚ÉŠÜ‚Ü‚ê‚é‚©
+	bool OBB_Contains_AABB(const OBB& obb, const AABB& aabb);
+	//a‚ªb‚ÉŠÜ‚Ü‚ê‚é‚©
+	bool OBB_Contains_OBB(const OBB& a, const OBB& b);
 
 
 	//‰^“®ƒ‚ƒfƒ‹

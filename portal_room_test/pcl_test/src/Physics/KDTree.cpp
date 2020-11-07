@@ -1,7 +1,7 @@
-#include "Physics/KDTree.h"
+#include "src/Physics/KDTree.h"
 
-#include "Math/Math.h"
-#include "Physics/CollisionModel.h"
+#include "src/Math/Math.h"
+#include "src/Physics/CollisionModel.h"
 
 namespace Physics {
 

@@ -1,8 +1,8 @@
 #ifndef INCLUDED_PHYSICS_COLLISIONMODEL_H
 #define INCLUDED_PHYSICS_COLLISIONMODEL_H
 
-#include "Math/Vector3.h"
-#include "Math/Matrix44.h"
+#include "src/Math/Vector3.h"
+#include "src/Math/Matrix44.h"
 
 namespace Physics {
 
