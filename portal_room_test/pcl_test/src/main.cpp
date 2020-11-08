@@ -27,6 +27,7 @@
 #include <string>
 #include <cstdio>
 #include <vector>
+#include <algorithm>
 
 using namespace std;
 using namespace pcl;
@@ -321,7 +322,8 @@ bool Func4(vector<OBB>& rooms
 , const AABB& all
 , const vector<Poly>& floorPoly, const vector<Poly>& wallPoly, const vector<Vector3>& vertices)
 {
-	//0`89“x‚Ü‚ÅY‰ñ“]‚³‚¹‚Â‚ÂAXZ•½–Ê‚Åƒ|ƒŠƒSƒ“‚É“–‚½‚é‚Ü‚ÅL‚°‚ÄA‚à‚Á‚Æ‚à‘ÌÏ‚ª‘å‚«‚­‚È‚éŠp“x‚ğŒ©‚Â‚¯‚é
+	//0`89“x‚Ü‚ÅY‰ñ“]‚³‚¹‚Â‚ÂA²‚ğL‚Î‚µ‚Ä‘ÌÏ‚ªÅ‘å‚É‚È‚éŠp“x‚ğ’T‚·
+	//‚»‚ê‚©‚çXYZ‚ğ‚»‚ê‚¼‚êƒ|ƒŠƒSƒ“‚É“–‚½‚é‚Ü‚ÅL‚°‚é
 	for (int r = 0; r < rooms.size(); ++r)
 	{
 		OBB& obb = rooms[r];
@@ -337,114 +339,11 @@ bool Func4(vector<OBB>& rooms
 			tmp.mIvsRot = rot.inverse();
 
 			//•Ç‚Æ‚Ì“–‚½‚è‚Ü‚ÅŠg’£
-			for (int x = 0; x <= 1000; ++x)
+			for (int l = 0; l <= 1000; ++l)
 			{
 				OBB roll = tmp;
-				float add = static_cast<float>(x) * addv;
-				tmp.mHalfSize.x += add;
-				tmp.mPos.x -= add;
-
-				bool isHit = false;
-				for (const Poly& p : wallPoly)
-				{
-					TriPlane tp(vertices[p.index[0]], vertices[p.index[1]], vertices[p.index[2]]);
-					if (TriPlane_HitCheck_OBB(tp, tmp))
-					{
-						isHit = true;
-						break;
-					}
-				}
-				for (int r2 = 0; r2 < r && !isHit; ++r2)
-				{
-					if (r == r2) { continue; }
-
-					if (OBB_HitCheck_OBB(tmp, rooms[r2]))
-					{
-						isHit = true;
-					}
-				}
-				bool isOut = !OBB_Contains_AABB(tmp, all);
-
-				if (isHit || isOut)
-				{
-					tmp = roll;
-					break;
-				}
-			}
-			for (int x = 0; x <= 1000; ++x)
-			{
-				OBB roll = tmp;
-				float add = static_cast<float>(x) * addv;
-				tmp.mHalfSize.x += add;
-				tmp.mPos.x += add;
-
-				bool isHit = false;
-				for (const Poly& p : wallPoly)
-				{
-					TriPlane tp(vertices[p.index[0]], vertices[p.index[1]], vertices[p.index[2]]);
-					if (TriPlane_HitCheck_OBB(tp, tmp))
-					{
-						isHit = true;
-						break;
-					}
-				}
-				for (int r2 = 0; r2 < r && !isHit; ++r2)
-				{
-					if (r == r2) { continue; }
-
-					if (OBB_HitCheck_OBB(tmp, rooms[r2]))
-					{
-						isHit = true;
-					}
-				}
-				bool isOut = !OBB_Contains_AABB(tmp, all);
-
-				if (isHit || isOut)
-				{
-					tmp = roll;
-					break;
-				}
-			}
-			for (int z = 0; z <= 1000; ++z)
-			{
-				OBB roll = tmp;
-				float add = static_cast<float>(z) * addv;
-				tmp.mHalfSize.z += add;
-				tmp.mPos.z -= add;
-
-				bool isHit = false;
-				for (const Poly& p : wallPoly)
-				{
-					TriPlane tp(vertices[p.index[0]], vertices[p.index[1]], vertices[p.index[2]]);
-					if (TriPlane_HitCheck_OBB(tp, tmp))
-					{
-						isHit = true;
-						break;
-					}
-				}
-				for (int r2 = 0; r2 < r && !isHit; ++r2)
-				{
-					if (r == r2) { continue; }
-
-					if (OBB_HitCheck_OBB(tmp, rooms[r2]))
-					{
-						isHit = true;
-					}
-				}
-				bool isOut = !OBB_Contains_AABB(tmp, all);
-
-				if (isHit || isOut)
-				{
-					tmp = roll;
-					break;
-				}
-			}
-			for (int z = 0; z <= 1000; ++z)
-			{
-				OBB roll = tmp;
-				float add = static_cast<float>(z) * addv;
-				tmp.mHalfSize.z += add;
-				tmp.mPos.z += add;
+				float add = static_cast<float>(l) * addv;
+				tmp.mHalfSize += tmp.mHalfSize.normalize() * add;
 
 				bool isHit = false;
 				for (const Poly& p : wallPoly)
@@ -478,7 +377,146 @@ bool Func4(vector<OBB>& rooms
 			if (v > volume)
 			{
 				volume = v;
-				obb = tmp;
+				obb.mRot = tmp.mRot;
+				obb.mIvsRot = tmp.mIvsRot;
+			}
+		}
+
+		//•Ç‚Æ‚Ì“–‚½‚è‚Ü‚ÅŠg’£
+		for (int x = 0; x <= 1000; ++x)
+		{
+			OBB roll = obb;
+			float add = static_cast<float>(x) * addv;
+			obb.mHalfSize.x += add;
+			obb.mPos.x -= add;
+
+			bool isHit = false;
+			for (const Poly& p : wallPoly)
+			{
+				TriPlane tp(vertices[p.index[0]], vertices[p.index[1]], vertices[p.index[2]]);
+				if (TriPlane_HitCheck_OBB(tp, obb))
+				{
+					isHit = true;
+					break;
+				}
+			}
+			for (int r2 = 0; r2 < r && !isHit; ++r2)
+			{
+				if (r == r2) { continue; }
+
+				if (OBB_HitCheck_OBB(obb, rooms[r2]))
+				{
+					isHit = true;
+				}
+			}
+			bool isOut = !OBB_Contains_AABB(obb, all);
+
+			if (isHit || isOut)
+			{
+				obb = roll;
+				break;
+			}
+		}
+		for (int x = 0; x <= 1000; ++x)
+		{
+			OBB roll = obb;
+			float add = static_cast<float>(x) * addv;
+			obb.mHalfSize.x += add;
+			obb.mPos.x += add;
+
+			bool isHit = false;
+			for (const Poly& p : wallPoly)
+			{
+				TriPlane tp(vertices[p.index[0]], vertices[p.index[1]], vertices[p.index[2]]);
+				if (TriPlane_HitCheck_OBB(tp, obb))
+				{
+					isHit = true;
+					break;
+				}
+			}
+			for (int r2 = 0; r2 < r && !isHit; ++r2)
+			{
+				if (r == r2) { continue; }
+
+				if (OBB_HitCheck_OBB(obb, rooms[r2]))
+				{
+					isHit = true;
+				}
+			}
+			bool isOut = !OBB_Contains_AABB(obb, all);
+
+			if (isHit || isOut)
+			{
+				obb = roll;
+				break;
+			}
+		}
+		for (int z = 0; z <= 1000; ++z)
+		{
+			OBB roll = obb;
+			float add = static_cast<float>(z) * addv;
+			obb.mHalfSize.z += add;
+			obb.mPos.z -= add;
+
+			bool isHit = false;
+			for (const Poly& p : wallPoly)
+			{
+				TriPlane tp(vertices[p.index[0]], vertices[p.index[1]], vertices[p.index[2]]);
+				if (TriPlane_HitCheck_OBB(tp, obb))
+				{
+					isHit = true;
+					break;
+				}
+			}
+			for (int r2 = 0; r2 < r && !isHit; ++r2)
+			{
+				if (r == r2) { continue; }
+
+				if (OBB_HitCheck_OBB(obb, rooms[r2]))
+				{
+					isHit = true;
+				}
+			}
+			bool isOut = !OBB_Contains_AABB(obb, all);
+
+			if (isHit || isOut)
+			{
+				obb = roll;
+				break;
+			}
+		}
+		for (int z = 0; z <= 1000; ++z)
+		{
+			OBB roll = obb;
+			float add = static_cast<float>(z) * addv;
+			obb.mHalfSize.z += add;
+			obb.mPos.z += add;
+
+			bool isHit = false;
+			for (const Poly& p : wallPoly)
+			{
+				TriPlane tp(vertices[p.index[0]], vertices[p.index[1]], vertices[p.index[2]]);
+				if (TriPlane_HitCheck_OBB(tp, obb))
+				{
+					isHit = true;
+					break;
+				}
+			}
+			for (int r2 = 0; r2 < r && !isHit; ++r2)
+			{
+				if (r == r2) { continue; }
+
+				if (OBB_HitCheck_OBB(obb, rooms[r2]))
+				{
+					isHit = true;
+				}
+			}
+			bool isOut = !OBB_Contains_AABB(obb, all);
+
+			if (isHit || isOut)
+			{
+				obb = roll;
+				break;
 			}
 		}
 
@@ -580,6 +618,51 @@ bool Func5(vector<OBB>& rooms)
 	{
 		rooms.erase(rooms.begin() + idx);
 	}
+
+	return true;
+}
+
+//Œ»İ‚Ìƒ‹[ƒ€ƒTƒCƒY‚ğ‰Šú‰»‚µ‚ÄA•ªŠ„”‚ªÅ¬‚É‚È‚é‚æ‚¤‚·
+//‡—ñ‚ÅFunc2`5‚ğ‚·H
+bool Func6(vector<OBB>& rooms
+	, const AABB& all
+	, const vector<Poly>& floorPoly, const vector<Poly>& wallPoly, const vector<Vector3>& vertices)
+{
+	vector<OBB> firstRooms = rooms;
+	int divNum = firstRooms.size();
+
+	vector<int> indices(firstRooms.size());
+	std::iota(indices.begin(), indices.end(), 0);
+	while (next_permutation(indices.begin(), indices.end()))//ˆê”ÔÅ‰‚Ì‡—ñ‚Ìƒpƒ^[ƒ“‚ÍŠù‚É•ªŠ„Ï‚İ‚¾‚©‚ç–³‹‚Å‚¢‚¢
+	{
+		//•À‚Ñ•Ï‚¦‚½ƒ‹[ƒ€‚ğì‚é
+		vector<OBB> tmpRooms;
+		tmpRooms.reserve(5000);
+		for (int i = 0; i < indices.size(); ++i)
+		{
+			AABB tmpAll(firstRooms[indices[i]]);
+			if (Func2(tmpRooms, tmpAll))
+			{
+				if (Func3(tmpRooms, tmpAll, floorPoly, wallPoly, vertices))
+				{
+
+				}
+			}
+		}
+
+		//•ªŠ„‚Ì‚µ’¼‚µ
+		if (Func4(tmpRooms, all, floorPoly, wallPoly, vertices))
+		{
+			if (Func5(tmpRooms))
+			{
+				if (tmpRooms.size() < divNum)
+				{
+					divNum = tmpRooms.size();
+					rooms = tmpRooms;
+				}
+			}
+		}
+	};
 
 	return true;
 }
@@ -697,7 +780,10 @@ main(int argc, char** argv)
 				{
 					if (Func5(rooms))
 					{
-						Draw(rooms, vertices, floorPoly, wallPoly);
+						if (Func6(rooms, all, floorPoly, wallPoly, vertices))
+						{
+							Draw(rooms, vertices, floorPoly, wallPoly);
+						}
 					}
 				}
 			}

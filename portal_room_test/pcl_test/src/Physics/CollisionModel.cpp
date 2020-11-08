@@ -58,6 +58,39 @@ namespace Physics {
 	AABB::AABB(const Math::Vector3& min, const Math::Vector3& max) :
 		mMin(min),
 		mMax(max) {}
+	AABB::AABB(const Physics::OBB & obb)
+		: mMin()
+		, mMax()
+	{
+		Math::Vector3 _edges[3]{ Math::Vector3(obb.mHalfSize.x * 2.f, 0, 0), Math::Vector3(0, obb.mHalfSize.y * 2.f, 0), Math::Vector3(0, 0, obb.mHalfSize.z * 2.f) };
+		_edges[0] *= obb.mRot;
+		_edges[1] *= obb.mRot;
+		_edges[2] *= obb.mRot;
+		Math::Vector3 _origin = obb.mPos;
+
+		Math::Vector3 vertices[8]{};
+		vertices[0] = _origin + (_edges[0] * 0.5f) + (_edges[1] * 0.5f) + (_edges[2] * 0.5f);
+		vertices[1] = vertices[0] - _edges[2];
+		vertices[2] = vertices[0] - _edges[0];
+		vertices[3] = vertices[2] - _edges[2];
+
+		vertices[4] = vertices[0] - _edges[1];
+		vertices[5] = vertices[4] - _edges[2];
+		vertices[6] = vertices[4] - _edges[0];
+		vertices[7] = vertices[6] - _edges[2];
+
+		mMin = mMax = obb.mPos;
+		for (const Math::Vector3& v : vertices)
+		{
+			mMin.x = std::min(v.x, mMin.x);
+			mMin.y = std::min(v.y, mMin.y);
+			mMin.z = std::min(v.z, mMin.z);
+
+			mMax.x = std::max(v.x, mMax.x);
+			mMax.y = std::max(v.y, mMax.y);
+			mMax.z = std::max(v.z, mMax.z);
+		}
+	}
 	AABB::AABB(const AABB& a):
 		mMin(a.mMin),
 		mMax(a.mMax){}

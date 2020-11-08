@@ -4,6 +4,11 @@
 #include "src/Math/Vector3.h"
 #include "src/Math/Matrix44.h"
 
+namespace Physics
+{
+	class OBB;
+}
+
 namespace Physics {
 
 	//è’ìÀÉÇÉfÉã
@@ -50,6 +55,7 @@ namespace Physics {
 	public:
 		AABB();
 		AABB(const Math::Vector3& min, const Math::Vector3& max);
+		AABB(const Physics::OBB& obb);
 		AABB(const AABB& a);
 		~AABB();
 		AABB& operator=(const AABB& a);
