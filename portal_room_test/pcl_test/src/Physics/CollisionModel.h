@@ -77,6 +77,28 @@ namespace Physics {
 			return (mHalfSize.x * mHalfSize.y * mHalfSize.z) * 8.f;
 		}
 
+		std::vector<Math::Vector3> GetVertices() const
+		{
+			Math::Vector3 _edges[3]{ Math::Vector3(mHalfSize.x * 2.f, 0, 0), Math::Vector3(0, mHalfSize.y * 2.f, 0), Math::Vector3(0, 0, mHalfSize.z * 2.f) };
+			_edges[0] *= mRot;
+			_edges[1] *= mRot;
+			_edges[2] *= mRot;
+			Math::Vector3 _origin = mPos;
+
+			std::vector<Math::Vector3> vertices(8);
+			vertices[0] = _origin + (_edges[0] * 0.5f) + (_edges[1] * 0.5f) + (_edges[2] * 0.5f);
+			vertices[1] = vertices[0] - _edges[2];
+			vertices[2] = vertices[0] - _edges[0];
+			vertices[3] = vertices[2] - _edges[2];
+
+			vertices[4] = vertices[0] - _edges[1];
+			vertices[5] = vertices[4] - _edges[2];
+			vertices[6] = vertices[4] - _edges[0];
+			vertices[7] = vertices[6] - _edges[2];
+
+			return vertices;
+		}
+
 		Math::Vector3 mPos, mHalfSize;
 		Math::Matrix44 mRot, mIvsRot;
 	};

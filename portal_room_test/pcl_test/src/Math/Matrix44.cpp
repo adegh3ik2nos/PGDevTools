@@ -367,6 +367,12 @@ namespace Math {
 
 		return t;
 	}
+	Math::Vector3 Matrix44::operator*(const Math::Vector3& v)
+	{
+		Math::Vector3 rtv;
+		multiply(&rtv, v);
+		return rtv;
+	}
 	void Matrix44::multiply(Vector3* out, const Vector3& in) const {
 		//“¯‚¶ƒxƒNƒgƒ‹‚Å–â‘è‚È‚µ
 		float dx = in.x;

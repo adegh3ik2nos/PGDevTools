@@ -58,6 +58,7 @@ namespace Math {
 		//行列掛け合わせ
 		Matrix44& operator*=(const Matrix44& a);
 		const Matrix44 operator*(const Matrix44& a) const;
+		Math::Vector3 operator*(const Math::Vector3& v);
 		//同じベクトルで問題なし
 		void multiply(
 			Vector3* out, 

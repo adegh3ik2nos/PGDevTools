@@ -180,9 +180,9 @@ namespace Physics {
 		//絶対に届かなければ終了
 		float len_tp_lp = tp.mNormal.dot(lay.mPos) + tp.mD;
 		if (len_tp_lp > lay.mVec.length()) return false;
-		//裏からと平行な通過であれば終了
+		//平行な通過であれば終了
 		float dot_nv = tp.mNormal.dot(lay.mVec);
-		if (dot_nv >= 0.f) return false;
+		if (dot_nv == 0.f) return false;
 		//線分が平面を通過するか
 		float t = -len_tp_lp / dot_nv;
 		if (t < 0.f || t > 1.f) return false;

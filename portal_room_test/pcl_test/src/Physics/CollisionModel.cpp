@@ -67,20 +67,9 @@ namespace Physics {
 		_edges[1] *= obb.mRot;
 		_edges[2] *= obb.mRot;
 		Math::Vector3 _origin = obb.mPos;
-
-		Math::Vector3 vertices[8]{};
-		vertices[0] = _origin + (_edges[0] * 0.5f) + (_edges[1] * 0.5f) + (_edges[2] * 0.5f);
-		vertices[1] = vertices[0] - _edges[2];
-		vertices[2] = vertices[0] - _edges[0];
-		vertices[3] = vertices[2] - _edges[2];
-
-		vertices[4] = vertices[0] - _edges[1];
-		vertices[5] = vertices[4] - _edges[2];
-		vertices[6] = vertices[4] - _edges[0];
-		vertices[7] = vertices[6] - _edges[2];
-
+		
 		mMin = mMax = obb.mPos;
-		for (const Math::Vector3& v : vertices)
+		for (const Math::Vector3& v : obb.GetVertices())
 		{
 			mMin.x = std::min(v.x, mMin.x);
 			mMin.y = std::min(v.y, mMin.y);
