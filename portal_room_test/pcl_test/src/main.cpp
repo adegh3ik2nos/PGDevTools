@@ -74,6 +74,8 @@ double Func_E(const Cluster& c, const vector<Vector3>& vertices)
 		Math::Vector3 xyz_i1 = vertices[c.polys[i].index[1]];
 		Math::Vector3 xyz_i2 = vertices[c.polys[i].index[2]];
 
+		xyz_i0.y = xyz_i1.y = xyz_i2.y = 0;//“¯‚¶•½–Ê‚É’×‚·
+
 		cloud->points[i * 3 + 0] = xyz_i0.ToPointXYZ();
 		cloud->points[i * 3 + 1] = xyz_i1.ToPointXYZ();
 		cloud->points[i * 3 + 2] = xyz_i2.ToPointXYZ();
@@ -660,6 +662,59 @@ bool Func6(vector<OBB>& rooms
 			}
 		}
 	};
+
+	return true;
+}
+
+bool Func6(const vector<Poly>& floorPoly, const vector<Poly>& wallPoly, const vector<Vector3>& vertices)
+{
+	vector<Cluster> clustVec;
+	clustVec.resize(floorPoly.size());
+	for (int i = 0; i < clustVec.size(); ++i)
+	{
+		clustVec[i].polys.push_back(floorPoly[i]);
+		clustVec[i].e = Func_E(clustVec[i], vertices);
+	}
+
+
+	{
+		constexpr double lim_sub_e = 0.05;
+
+		int curIdx = 0;
+		while (curIdx < clustVec.size())
+		{
+			double min_e = lim_sub_e + 0.1;
+			int min_idx = -1;
+
+			for (int cl = curIdx + 1; cl < clustVec.size(); ++cl)
+			{
+				Cluster tmpClust = clustVec[curIdx];
+				std::copy(clustVec[cl].polys.begin(), clustVec[cl].polys.end(), std::back_inserter(tmpClust.polys));
+
+
+				tmpClust.e = Func_E(tmpClust, vertices);
+				double sub_e = max(tmpClust.e - (clustVec[curIdx].e + clustVec[cl].e), 0.0);
+
+				if (min_e > sub_e)
+				{
+					min_e = sub_e;
+					min_idx = cl;
+				}
+			}
+
+			if (0 < min_idx && min_e <= lim_sub_e)
+			{
+				std::copy(clustVec[min_idx].polys.begin(), clustVec[min_idx].polys.end(), std::back_inserter(clustVec[curIdx].polys));
+				clustVec.erase(clustVec.begin() + min_idx);
+
+				clustVec[curIdx].e = Func_E(clustVec[curIdx], vertices);
+			}
+			else
+			{
+				++curIdx;
+			}
+		}
+	}
 
 	return true;
 }
