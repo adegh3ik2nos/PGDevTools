@@ -26,13 +26,5 @@ namespace xl_fast
         {
             InitializeComponent();
         }
-
-        private void DataGrid_AutoGeneratingColumn(object sender, DataGridAutoGeneratingColumnEventArgs e)
-        {
-            if (e.PropertyName == "＼")
-            {
-                e.Cancel = true;
-            }
-        }
     }
 }

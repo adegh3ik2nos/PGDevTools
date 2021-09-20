@@ -16,14 +16,7 @@
             <ColumnDefinition Width="401*"/>
         </Grid.ColumnDefinitions>
         <DataGrid ItemsSource="{Binding DataTableView}"
-              SelectedItem="{Binding SelectedRow}"
-              IsReadOnly="False" Grid.ColumnSpan="2" Margin="0,38,0,0"
-              AutoGeneratingColumn="DataGrid_AutoGeneratingColumn">
-            <DataGrid.RowHeaderStyle>
-                <Style TargetType="{x:Type DataGridRowHeader}">
-                    <Setter Property="Content" Value="{Binding [0]}"/>
-                </Style>
-            </DataGrid.RowHeaderStyle>
+              IsReadOnly="False" Grid.ColumnSpan="2" Margin="0,38,0,0" CanUserDeleteRows="False">
         </DataGrid>
         <Button x:Name="button" Content="保存" HorizontalAlignment="Left" VerticalAlignment="Top" Width="52" Height="38"
                 Command="{Binding SaveCommand}"/>
