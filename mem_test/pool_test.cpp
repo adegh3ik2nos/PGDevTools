@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include <chrono>
+#include <time.h>
 
 
 #ifdef WIN32
@@ -115,6 +116,50 @@ private:
 		uint32_t isUseable : 1;
 		uint32_t size : 31;
 	};
+	struct BlockHeaderRef final
+	{
+		BlockHeaderRef()
+			: headerAddress(0)
+			, mutex()
+		{
+		}
+		pointer_t headerAddress;
+		std::mutex mutex;
+	};
+
+	class AllBlockScopedLock final
+	{
+	public:
+		AllBlockScopedLock(MemoryPool& pool)
+			: m_pool(pool)
+		{
+			//頭からロック取っていくので、頭のロックを取れるかどうかでどちらの命令が全てのロックを取るかが決まる
+			//デッドロックは起こらないはず
+			uint8_t* pCurrent = m_pool.m_pBuff[BUFF_TYPE_HeaderRef];
+			uint8_t* pEnd = m_pool.m_pBuff[BUFF_TYPE_HeaderRef] + HEADER_REF_SIZE;
+			while (pEnd > pCurrent)
+			{
+				BlockHeaderRef* pHederRef = reinterpret_cast<BlockHeaderRef*>(pCurrent);
+				pHederRef->mutex.lock();
+				pCurrent += sizeof(BlockHeaderRef);
+			}
+		}
+		~AllBlockScopedLock()
+		{
+			//アンロックも頭からすればその分無駄が無いはず
+			uint8_t* pCurrent = m_pool.m_pBuff[BUFF_TYPE_HeaderRef];
+			uint8_t* pEnd = m_pool.m_pBuff[BUFF_TYPE_HeaderRef] + HEADER_REF_SIZE;
+			while (pEnd > pCurrent)
+			{
+				BlockHeaderRef* pHederRef = reinterpret_cast<BlockHeaderRef*>(pCurrent);
+				pHederRef->mutex.unlock();
+				pCurrent += sizeof(BlockHeaderRef);
+			}
+		}
+
+	private:
+		MemoryPool& m_pool;
+	};
 
 public:
 	template<typename Type>
@@ -126,7 +171,7 @@ public:
 			, m_pHeaderRef(nullptr)
 		{
 		}
-		Handle(MemoryPool* pPool, pointer_t* pHeaderRef)
+		Handle(MemoryPool* pPool, BlockHeaderRef* pHeaderRef)
 			: m_pPool(pPool)
 			, m_pHeaderRef(pHeaderRef)
 		{
@@ -176,36 +221,64 @@ public:
 
 	private:
 		MemoryPool* m_pPool;
-		pointer_t* m_pHeaderRef;
+		BlockHeaderRef* m_pHeaderRef;
 	};
-	
+
+	template<typename Type>
+	class ProxyObj
+	{
+	public:
+		ProxyObj(MemoryPool* pPool, BlockHeaderRef* pHeaderRef)
+			: m_pPool(pPool)
+			, m_pHeaderRef(pHeaderRef)
+		{
+			m_pHeaderRef->mutex.lock();
+		}
+		~ProxyObj()
+		{
+			m_pHeaderRef->mutex.unlock();
+		}
+
+	private:
+		ProxyObj(const ProxyObj<Type>&) = delete;
+		ProxyObj<Type>& operator=(const ProxyObj<Type>&) = delete;
+
+	public:
+		operator Type&()
+		{
+			return *(m_pPool->_GetLockObj<Type>(m_pHeaderRef));
+		}
+		operator const Type&() const
+		{
+			return *(m_pPool->_GetLockObj<Type>(m_pHeaderRef));
+		}
+
+	private:
+		MemoryPool* m_pPool;
+		BlockHeaderRef* m_pHeaderRef;
+	};
 
 public:
 	MemoryPool()
 		: m_pBuff{}
-		, m_buffMutex()
 
 		, m_dbgIsUseHeap(false)
 	{
-		std::lock_guard<std::mutex> lock(m_buffMutex);
-
 		m_pBuff[BUFF_TYPE_Pool_00] = reinterpret_cast<uint8_t*>(std::calloc(POOL_SIZE_00, sizeof(uint8_t)));
-		m_pBuff[BUFF_TYPE_HeaderRef] = reinterpret_cast<uint8_t*>(std::calloc(HEADER_REF_SIZE, sizeof(uint8_t)));
+		m_pBuff[BUFF_TYPE_HeaderRef] = reinterpret_cast<uint8_t*>(new BlockHeaderRef[HEADER_REF_SIZE / sizeof(BlockHeaderRef)]);
 
 		//ヘッダも埋め込んでおく
-		BlockHeader* pHeader = reinterpret_cast<BlockHeader*>(m_pBuff[BUFF_TYPE_Pool_00]);
-		pHeader->isUseable = 1;
-		pHeader->size = POOL_SIZE_00 - sizeof(BlockHeader);
+		BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(m_pBuff[BUFF_TYPE_Pool_00]);
+		pBlockHeader->isUseable = 1;
+		pBlockHeader->size = POOL_SIZE_00 - sizeof(BlockHeader);
 
 		//ヘッダへの参照を保持
-		pointer_t* pHeaderRef = reinterpret_cast<pointer_t*>(m_pBuff[BUFF_TYPE_HeaderRef]);
-		*pHeaderRef = reinterpret_cast<pointer_t>(pHeader);
+		BlockHeaderRef* pHeaderRef = reinterpret_cast<BlockHeaderRef*>(m_pBuff[BUFF_TYPE_HeaderRef]);
+		pHeaderRef->headerAddress = reinterpret_cast<pointer_t>(pBlockHeader);
 	}
 	~MemoryPool()
 	{
-		std::lock_guard<std::mutex> lock(m_buffMutex);
-
-		std::free(m_pBuff[BUFF_TYPE_HeaderRef]);
+		delete[] reinterpret_cast<BlockHeaderRef*>(m_pBuff[BUFF_TYPE_HeaderRef]);
 		std::free(m_pBuff[BUFF_TYPE_Pool_00]);
 	}
 
@@ -213,10 +286,10 @@ public:
 	template<typename Type, class... Args>
 	Handle<Type> CreateObject(Args... args)
 	{
-		std::lock_guard<std::mutex> lock(m_buffMutex);
+		AllBlockScopedLock lock(*this);
 
 		//生成
-		pointer_t* pUseableHeaderRef = _SearchUsealeHeaderRef();
+		BlockHeaderRef* pUseableHeaderRef = _SearchUsealeHeaderRef();
 		if (nullptr != pUseableHeaderRef)
 		{
 			BlockHeader* pUseableHeader = _SearchUseableHeader(sizeof(Type));
@@ -248,7 +321,7 @@ public:
 				Type* pObject = new(pU8BlockHeader + sizeof(BlockHeader)) Type(args...);
 
 				//ヘッダ参照
-				*pUseableHeaderRef = reinterpret_cast<pointer_t>(pUseableHeader);
+				pUseableHeaderRef->headerAddress = reinterpret_cast<pointer_t>(pUseableHeader);
 			}
 			else//ヒープ使用
 			{
@@ -256,7 +329,7 @@ public:
 				Type* pObject = new Type(args...);
 
 				//ヘッダ参照
-				*pUseableHeaderRef = reinterpret_cast<pointer_t>(pObject);
+				pUseableHeaderRef->headerAddress = reinterpret_cast<pointer_t>(pObject);
 
 
 				m_dbgIsUseHeap = true;
@@ -272,7 +345,7 @@ public:
 
 	void Compaction(int num)
 	{
-		std::lock_guard<std::mutex> lock(m_buffMutex);
+		AllBlockScopedLock lock(*this);
 
 		uint8_t* pCurrent = m_pBuff[BUFF_TYPE_Pool_00];
 		uint8_t* pEnd = m_pBuff[BUFF_TYPE_Pool_00] + POOL_SIZE_00;
@@ -282,29 +355,29 @@ public:
 		int currentNum = 0;
 		while (pEnd > pCurrent)
 		{
-			BlockHeader* pHeader = reinterpret_cast<BlockHeader*>(pCurrent);
+			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pCurrent);
 
-			if (0 != pHeader->isUseable)
+			if (0 != pBlockHeader->isUseable)
 			{
 				if (nullptr == pUseableHeader)
 				{
-					pUseableHeader = pHeader;
-					useableSize = pHeader->size;
+					pUseableHeader = pBlockHeader;
+					useableSize = pBlockHeader->size;
 				}
 				else
 				{
-					useableSize += sizeof(BlockHeader) + pHeader->size;
+					useableSize += sizeof(BlockHeader) + pBlockHeader->size;
 				}
 			}
 			else if(nullptr != pUseableHeader)
 			{
 				//未使用メモリ使って複製
 				pUseableHeader->isUseable = 0;
-				pUseableHeader->size = pHeader->size;
+				pUseableHeader->size = pBlockHeader->size;
 				std::memmove(
 					reinterpret_cast<uint8_t*>(pUseableHeader) + sizeof(BlockHeader),
-					reinterpret_cast<uint8_t*>(pHeader) + sizeof(BlockHeader),
-					pHeader->size);
+					reinterpret_cast<uint8_t*>(pBlockHeader) + sizeof(BlockHeader),
+					pBlockHeader->size);
 
 				//コンパクションした次のメモリブロック
 				BlockHeader* pNextBlockHeader =
@@ -313,22 +386,23 @@ public:
 				pNextBlockHeader->size = useableSize;
 
 				//ヘッダの参照を差し替え
-				pointer_t* pHeaderRefEnd = reinterpret_cast<pointer_t*>(m_pBuff[BUFF_TYPE_HeaderRef] + HEADER_REF_SIZE);
-				pointer_t* pHeaderRef =
-					std::find(
-						reinterpret_cast<pointer_t*>(m_pBuff[BUFF_TYPE_HeaderRef]), 
+				BlockHeaderRef* pHeaderRefEnd = reinterpret_cast<BlockHeaderRef*>(m_pBuff[BUFF_TYPE_HeaderRef] + HEADER_REF_SIZE);
+				pointer_t blockHeaderAddress = reinterpret_cast<pointer_t>(pBlockHeader);
+				BlockHeaderRef* pHeaderRef =
+					std::find_if(
+						reinterpret_cast<BlockHeaderRef*>(m_pBuff[BUFF_TYPE_HeaderRef]),
 						pHeaderRefEnd,
-						reinterpret_cast<pointer_t>(pHeader));
+						[blockHeaderAddress](const BlockHeaderRef& v) {return v.headerAddress == blockHeaderAddress; });
 				if (pHeaderRefEnd != pHeaderRef)
 				{
-					*pHeaderRef = reinterpret_cast<pointer_t>(pUseableHeader);
+					pHeaderRef->headerAddress = reinterpret_cast<pointer_t>(pUseableHeader);
 				}
 				else
 				{
 					_ASSERT_EXPR(false, "ヘッダ参照が消えている");
 				}
 
-				pHeader = pUseableHeader;
+				pBlockHeader = pUseableHeader;
 				pCurrent = reinterpret_cast<uint8_t*>(pUseableHeader);
 
 				++currentNum;
@@ -343,7 +417,7 @@ public:
 				}
 			}
 
-			pCurrent += sizeof(BlockHeader) + pHeader->size;
+			pCurrent += sizeof(BlockHeader) + pBlockHeader->size;
 		}
 	}
 
@@ -364,18 +438,18 @@ private:
 
 		while (pEnd > pCurrent)
 		{
-			BlockHeader* pHeader = reinterpret_cast<BlockHeader*>(pCurrent);
+			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pCurrent);
 
-			if (0 != pHeader->isUseable)
+			if (0 != pBlockHeader->isUseable)
 			{
 				if (0 == useableSize)//連続未使用ブロックの先頭
 				{
-					pUseableHeader = pHeader;
-					useableSize = pHeader->size;
+					pUseableHeader = pBlockHeader;
+					useableSize = pBlockHeader->size;
 				}
 				else//連続未使用ブロックの先頭以外
 				{
-					useableSize += sizeof(BlockHeader) + pHeader->size;
+					useableSize += sizeof(BlockHeader) + pBlockHeader->size;
 				}
 
 				if (needsByte <= useableSize)
@@ -390,39 +464,39 @@ private:
 				useableSize = 0;
 			}
 
-			pCurrent += sizeof(BlockHeader) + pHeader->size;
+			pCurrent += sizeof(BlockHeader) + pBlockHeader->size;
 		}
 
 		return nullptr;
 	}
 
-	pointer_t* _SearchUsealeHeaderRef()
+	BlockHeaderRef* _SearchUsealeHeaderRef()
 	{
 		uint8_t* pCurrent = m_pBuff[BUFF_TYPE_HeaderRef];
 		uint8_t* pEnd = m_pBuff[BUFF_TYPE_HeaderRef] + HEADER_REF_SIZE;
 		while (pEnd > pCurrent)
 		{
-			pointer_t* pHederRef = reinterpret_cast<pointer_t*>(pCurrent);
+			BlockHeaderRef* pHederRef = reinterpret_cast<BlockHeaderRef*>(pCurrent);
 
 			//未使用メモリならヘッダの参照を戻す
-			if (0 == *pHederRef)
+			if (0 == pHederRef->headerAddress)
 			{
 				return pHederRef;
 			}
 
-			pCurrent += sizeof(pointer_t);
+			pCurrent += sizeof(BlockHeaderRef);
 		}
 
 		return nullptr;
 	}
 
 	template<typename Type>
-	void _ReleaseBlock(pointer_t* pHeaderRef)
+	void _ReleaseBlock(BlockHeaderRef* pHeaderRef)
 	{
-		std::lock_guard<std::mutex> lock(m_buffMutex);
+		AllBlockScopedLock lock(*this);
 
 		//破棄
-		uint8_t* pU8BlockHeader = reinterpret_cast<uint8_t*>(*pHeaderRef);
+		uint8_t* pU8BlockHeader = reinterpret_cast<uint8_t*>(pHeaderRef->headerAddress);
 		if (_IsPoolRange(pU8BlockHeader))
 		{
 			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pU8BlockHeader);
@@ -446,12 +520,31 @@ private:
 		}
 
 		//ヘッダ参照情報をクリアする
-		*pHeaderRef = 0;
+		pHeaderRef->headerAddress = 0;
+	}
+
+	template<typename Type>
+	Type* _GetLockObj(BlockHeaderRef* pHeaderRef) const
+	{
+		pHeaderRef->mutex.lock();
+
+		//破棄
+		uint8_t* pU8BlockHeader = reinterpret_cast<uint8_t*>(pHeaderRef->headerAddress);
+		if (_IsPoolRange(pU8BlockHeader))
+		{
+			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pU8BlockHeader);
+			Type* pObject = reinterpret_cast<Type*>(pU8BlockHeader + sizeof(BlockHeader));
+			return pObject;
+		}
+		else
+		{
+			return reinterpret_cast<Type*>(pU8BlockHeader);
+		}
 	}
 
 private:
 	static constexpr size_t POOL_SIZE_00 = 1024 * 300;//プール０の最大バイト数
-	static constexpr size_t HEADER_REF_SIZE = sizeof(pointer_t) * 3000;//ヘッダ参照領域の最大バイト数
+	static constexpr size_t HEADER_REF_SIZE = sizeof(BlockHeaderRef) * 3000;//ヘッダ参照領域の最大バイト数
 
 	enum BUFF_TYPE : int
 	{
@@ -461,7 +554,6 @@ private:
 		BUFF_TYPE_Num
 	};
 	uint8_t* m_pBuff[BUFF_TYPE_Num];
-	mutable std::mutex m_buffMutex;
 
 	//デバッグ
 public:
@@ -470,27 +562,56 @@ public:
 		return m_dbgIsUseHeap;
 	}
 
-	size_t GetFreeByte() const
+	size_t GetFreeByte()
 	{
-		std::lock_guard<std::mutex> lock(m_buffMutex);
+		AllBlockScopedLock lock(*this);
 
 		size_t freeByte = 0;
 		uint8_t* pCurrent = m_pBuff[BUFF_TYPE_Pool_00];
 		uint8_t* pEnd = m_pBuff[BUFF_TYPE_Pool_00] + POOL_SIZE_00;
 		while (pEnd > pCurrent)
 		{
-			BlockHeader* pHeader = reinterpret_cast<BlockHeader*>(pCurrent);
+			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pCurrent);
 
 			//未使用メモリ
-			if (0 != pHeader->isUseable)
+			if (0 != pBlockHeader->isUseable)
 			{
-				freeByte += pHeader->size;
+				freeByte += pBlockHeader->size;
 			}
 
-			pCurrent += sizeof(BlockHeader) + pHeader->size;
+			pCurrent += sizeof(BlockHeader) + pBlockHeader->size;
 		}
 
 		return freeByte;
+	}
+
+	int GetFreeBlockNum()
+	{
+		AllBlockScopedLock lock(*this);
+
+		int freeBlockNum = 0;
+		bool isHead = true;
+		uint8_t* pCurrent = m_pBuff[BUFF_TYPE_Pool_00];
+		uint8_t* pEnd = m_pBuff[BUFF_TYPE_Pool_00] + POOL_SIZE_00;
+		while (pEnd > pCurrent)
+		{
+			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pCurrent);
+
+			//未使用メモリ
+			if (0 != pBlockHeader->isUseable && isHead)
+			{
+				++freeBlockNum;
+				isHead = false;
+			}
+			else
+			{
+				isHead = true;
+			}
+
+			pCurrent += sizeof(BlockHeader) + pBlockHeader->size;
+		}
+
+		return freeBlockNum;
 	}
 
 private:
@@ -498,7 +619,7 @@ private:
 
 };
 
-constexpr int THREAD_NUM = 1;
+constexpr int THREAD_NUM = 10;
 void test(MemoryPool& pool, int& count, std::mutex& countMutex, bool& isEnd, bool isUseCompaction)
 {
 	constexpr int INIT_NUM = 120 / THREAD_NUM;
@@ -657,15 +778,13 @@ void test(MemoryPool& pool, int& count, std::mutex& countMutex, bool& isEnd, boo
 
 		{
 			std::lock_guard<std::mutex> lock(countMutex);
-			++count;
 
 			if (isUseCompaction)
 			{
-				if (count % 10 == 0)
-				{
-					pool.Compaction(3);
-				}
+				pool.Compaction(10);
 			}
+
+			++count;
 		}
 
 		if (pool.IsUseHeap())
@@ -679,16 +798,23 @@ void test(MemoryPool& pool, int& count, std::mutex& countMutex, bool& isEnd, boo
 	}
 }
 
-void out(MemoryPool& pool, int& count, bool& isEnd)
+void out(MemoryPool& pool, int& count, bool& isEnd, clock_t start)
 {
 	while (true)
 	{
 		system("cls");
 
+		clock_t end = clock();
+
+		size_t freeByte = pool.GetFreeByte();
+		int freeBlockNum = pool.GetFreeBlockNum();
+
 		std::cout << "count: " << count << std::endl;
-		std::cout << "freeByte: " << pool.GetFreeByte() << std::endl;
-		std::cout << "freeKB: " << pool.GetFreeByte() / 1024 << std::endl;
-		std::cout << "freeMB: " << pool.GetFreeByte() / 1024 / 1024 << std::endl;
+		std::cout << "freeByte: " << freeByte << std::endl;
+		std::cout << "freeKB: " << freeByte / 1024 << std::endl;
+		std::cout << "freeMB: " << freeByte / 1024 / 1024 << std::endl;
+		std::cout << "freeBlock: " << freeBlockNum << std::endl;
+		std::cout << "time: " << (static_cast<double>(end - start) / static_cast<double>(count)) << std::endl;
 
 
 		if (isEnd)
@@ -705,26 +831,36 @@ int main()
 #ifndef ALLOC_FREE_CHECK
 	MemoryPool pool;
 
+	constexpr bool isUseCompaction = true;
 	bool isEnd = false;
 	int count = 0;
 	std::mutex countMutex;
 
+	clock_t start = clock();
+
 	std::vector<std::thread> threadVec;
 	for (int i = 0; i < THREAD_NUM; ++i) 
 	{
-		threadVec.emplace_back(test, std::ref(pool), std::ref(count), std::ref(countMutex), std::ref(isEnd), false);
+		threadVec.emplace_back(test, std::ref(pool), std::ref(count), std::ref(countMutex), std::ref(isEnd), isUseCompaction);
 	}
-	threadVec.emplace_back(out, std::ref(pool), std::ref(count), std::ref(isEnd));
+	threadVec.emplace_back(out, std::ref(pool), std::ref(count), std::ref(isEnd), start);
 
 	for (int i = 0; i < THREAD_NUM + 1; ++i) { threadVec[i].join(); }
+
+	clock_t end = clock();
 
 	//最終結果
 	system("cls");
 
+	size_t freeByte = pool.GetFreeByte();
+	int freeBlockNum = pool.GetFreeBlockNum();
+
 	std::cout << "count: " << count << std::endl;
-	std::cout << "freeByte: " << pool.GetFreeByte() << std::endl;
-	std::cout << "freeKB: " << pool.GetFreeByte() / 1024 << std::endl;
-	std::cout << "freeMB: " << pool.GetFreeByte() / 1024 / 1024 << std::endl;
+	std::cout << "freeByte: " << freeByte << std::endl;
+	std::cout << "freeKB: " << freeByte / 1024 << std::endl;
+	std::cout << "freeMB: " << freeByte / 1024 / 1024 << std::endl;
+	std::cout << "freeBlock: " << freeBlockNum << std::endl;
+	std::cout << "time: " << (static_cast<double>(end - start) / static_cast<double>(count)) << std::endl;
 
 	system("pause");
 #else
