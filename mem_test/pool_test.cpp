@@ -1,7 +1,4 @@
-﻿// mem_test.cpp : このファイルには 'main' 関数が含まれています。プログラム実行の開始と終了がそこで行われます。
-//
-
-#include <iostream>
+﻿#include <iostream>
 #include <vector>
 #include <random>
 #include <array>
@@ -113,8 +110,8 @@ class MemoryPool
 private:
 	struct BlockHeader final
 	{
-		uint32_t isUseable : 1;
-		uint32_t size : 31;
+		uint32_t refIdx : 11;
+		uint32_t size : 21;
 	};
 	struct BlockHeaderRef final
 	{
@@ -204,18 +201,17 @@ public:
 		Handle& operator=(const Handle&) = delete;
 
 	public:
-		bool IsValid() const { return nullptr != m_pPool && nullptr != m_pHeaderRef; }
+		bool IsValid() const { return nullptr != m_pHeaderRef; }
 		bool IsInvalid() const { return !IsValid(); }
 
 		void Release()
 		{
-			if (nullptr != m_pHeaderRef && nullptr != m_pPool)
+			if (IsValid())
 			{
 				m_pPool->_ReleaseBlock<Type>(m_pHeaderRef);
 
 				//アクセス出来ないようにnullにする
 				m_pHeaderRef = nullptr;
-				m_pPool = nullptr;
 			}
 		}
 
@@ -265,16 +261,12 @@ public:
 		, m_dbgIsUseHeap(false)
 	{
 		m_pBuff[BUFF_TYPE_Pool_00] = reinterpret_cast<uint8_t*>(std::calloc(POOL_SIZE_00, sizeof(uint8_t)));
-		m_pBuff[BUFF_TYPE_HeaderRef] = reinterpret_cast<uint8_t*>(new BlockHeaderRef[HEADER_REF_SIZE / sizeof(BlockHeaderRef)]);
+		m_pBuff[BUFF_TYPE_HeaderRef] = reinterpret_cast<uint8_t*>(new BlockHeaderRef[HEADER_REF_NUM]);
 
 		//ヘッダも埋め込んでおく
 		BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(m_pBuff[BUFF_TYPE_Pool_00]);
-		pBlockHeader->isUseable = 1;
+		pBlockHeader->refIdx = HEADER_REF_NUM;
 		pBlockHeader->size = POOL_SIZE_00 - sizeof(BlockHeader);
-
-		//ヘッダへの参照を保持
-		BlockHeaderRef* pHeaderRef = reinterpret_cast<BlockHeaderRef*>(m_pBuff[BUFF_TYPE_HeaderRef]);
-		pHeaderRef->headerAddress = reinterpret_cast<pointer_t>(pBlockHeader);
 	}
 	~MemoryPool()
 	{
@@ -297,7 +289,7 @@ public:
 			{
 				//ヘッダ情報書き換え
 				uint8_t* pU8BlockHeader = reinterpret_cast<uint8_t*>(pUseableHeader);
-				pUseableHeader->isUseable = 0;
+				pUseableHeader->refIdx = pUseableHeaderRef - reinterpret_cast<BlockHeaderRef*>(m_pBuff[BUFF_TYPE_HeaderRef]);
 
 				if (sizeof(Type) > pUseableHeader->size)
 				{
@@ -311,7 +303,7 @@ public:
 				{
 					//次のヘッダ情報を書き換え
 					BlockHeader* pNextBlockHeader = reinterpret_cast<BlockHeader*>(pU8BlockHeader + (sizeof(BlockHeader) + sizeof(Type)));
-					pNextBlockHeader->isUseable = 1;
+					pNextBlockHeader->refIdx = HEADER_REF_NUM;
 					pNextBlockHeader->size = pUseableHeader->size - (sizeof(Type) + sizeof(BlockHeader));
 
 					pUseableHeader->size = sizeof(Type);
@@ -357,7 +349,7 @@ public:
 		{
 			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pCurrent);
 
-			if (0 != pBlockHeader->isUseable)
+			if (HEADER_REF_NUM == pBlockHeader->refIdx)
 			{
 				if (nullptr == pUseableHeader)
 				{
@@ -372,7 +364,7 @@ public:
 			else if(nullptr != pUseableHeader)
 			{
 				//未使用メモリ使って複製
-				pUseableHeader->isUseable = 0;
+				pUseableHeader->refIdx = pBlockHeader->refIdx;
 				pUseableHeader->size = pBlockHeader->size;
 				std::memmove(
 					reinterpret_cast<uint8_t*>(pUseableHeader) + sizeof(BlockHeader),
@@ -382,25 +374,12 @@ public:
 				//コンパクションした次のメモリブロック
 				BlockHeader* pNextBlockHeader =
 					reinterpret_cast<BlockHeader*>(reinterpret_cast<uint8_t*>(pUseableHeader) + sizeof(BlockHeader) + pUseableHeader->size);
-				pNextBlockHeader->isUseable = 1;
+				pNextBlockHeader->refIdx = HEADER_REF_NUM;
 				pNextBlockHeader->size = useableSize;
 
 				//ヘッダの参照を差し替え
-				BlockHeaderRef* pHeaderRefEnd = reinterpret_cast<BlockHeaderRef*>(m_pBuff[BUFF_TYPE_HeaderRef] + HEADER_REF_SIZE);
-				pointer_t blockHeaderAddress = reinterpret_cast<pointer_t>(pBlockHeader);
-				BlockHeaderRef* pHeaderRef =
-					std::find_if(
-						reinterpret_cast<BlockHeaderRef*>(m_pBuff[BUFF_TYPE_HeaderRef]),
-						pHeaderRefEnd,
-						[blockHeaderAddress](const BlockHeaderRef& v) {return v.headerAddress == blockHeaderAddress; });
-				if (pHeaderRefEnd != pHeaderRef)
-				{
-					pHeaderRef->headerAddress = reinterpret_cast<pointer_t>(pUseableHeader);
-				}
-				else
-				{
-					_ASSERT_EXPR(false, "ヘッダ参照が消えている");
-				}
+				BlockHeaderRef* pHeaderRef = reinterpret_cast<BlockHeaderRef*>(m_pBuff[BUFF_TYPE_HeaderRef]) + pUseableHeader->refIdx;
+				pHeaderRef->headerAddress = reinterpret_cast<pointer_t>(pUseableHeader);
 
 				pBlockHeader = pUseableHeader;
 				pCurrent = reinterpret_cast<uint8_t*>(pUseableHeader);
@@ -431,7 +410,7 @@ private:
 
 	BlockHeader* _SearchUseableHeader(size_t needsByte)
 	{
-		uint8_t* pCurrent = m_pBuff[BUFF_TYPE_Pool_00];
+		uint8_t* pCurrent = reinterpret_cast<uint8_t*>(m_pBuff[BUFF_TYPE_Pool_00]);
 		uint8_t* pEnd = m_pBuff[BUFF_TYPE_Pool_00] + POOL_SIZE_00;
 		BlockHeader* pUseableHeader = nullptr;
 		size_t useableSize = 0;
@@ -440,7 +419,7 @@ private:
 		{
 			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pCurrent);
 
-			if (0 != pBlockHeader->isUseable)
+			if (HEADER_REF_NUM == pBlockHeader->refIdx)
 			{
 				if (0 == useableSize)//連続未使用ブロックの先頭
 				{
@@ -472,7 +451,7 @@ private:
 
 	BlockHeaderRef* _SearchUsealeHeaderRef()
 	{
-		uint8_t* pCurrent = m_pBuff[BUFF_TYPE_HeaderRef];
+		uint8_t* pCurrent = reinterpret_cast<uint8_t*>(m_pBuff[BUFF_TYPE_HeaderRef]);
 		uint8_t* pEnd = m_pBuff[BUFF_TYPE_HeaderRef] + HEADER_REF_SIZE;
 		while (pEnd > pCurrent)
 		{
@@ -493,7 +472,7 @@ private:
 	template<typename Type>
 	void _ReleaseBlock(BlockHeaderRef* pHeaderRef)
 	{
-		AllBlockScopedLock lock(*this);
+		std::lock_guard<std::mutex> lock(pHeaderRef->mutex);
 
 		//破棄
 		uint8_t* pU8BlockHeader = reinterpret_cast<uint8_t*>(pHeaderRef->headerAddress);
@@ -506,7 +485,7 @@ private:
 				pObject->~Type();
 
 				//ヘッダ情報の書き換え
-				pBlockHeader->isUseable = 1;
+				pBlockHeader->refIdx = HEADER_REF_NUM;
 			}
 			else
 			{
@@ -544,7 +523,8 @@ private:
 
 private:
 	static constexpr size_t POOL_SIZE_00 = 1024 * 300;//プール０の最大バイト数
-	static constexpr size_t HEADER_REF_SIZE = sizeof(BlockHeaderRef) * 3000;//ヘッダ参照領域の最大バイト数
+	static constexpr int HEADER_REF_NUM = 1200;
+	static constexpr size_t HEADER_REF_SIZE = sizeof(BlockHeaderRef) * HEADER_REF_NUM;//ヘッダ参照領域の最大バイト数
 
 	enum BUFF_TYPE : int
 	{
@@ -574,7 +554,7 @@ public:
 			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pCurrent);
 
 			//未使用メモリ
-			if (0 != pBlockHeader->isUseable)
+			if (HEADER_REF_NUM == pBlockHeader->refIdx)
 			{
 				freeByte += pBlockHeader->size;
 			}
@@ -598,7 +578,7 @@ public:
 			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pCurrent);
 
 			//未使用メモリ
-			if (0 != pBlockHeader->isUseable && isHead)
+			if (HEADER_REF_NUM == pBlockHeader->refIdx && isHead)
 			{
 				++freeBlockNum;
 				isHead = false;
@@ -613,6 +593,28 @@ public:
 
 		return freeBlockNum;
 	}
+	int GetUseBlockNum()
+	{
+		AllBlockScopedLock lock(*this);
+
+		int useBlockNum = 0;
+		uint8_t* pCurrent = m_pBuff[BUFF_TYPE_Pool_00];
+		uint8_t* pEnd = m_pBuff[BUFF_TYPE_Pool_00] + POOL_SIZE_00;
+		while (pEnd > pCurrent)
+		{
+			BlockHeader* pBlockHeader = reinterpret_cast<BlockHeader*>(pCurrent);
+
+			//使用メモリ
+			if (HEADER_REF_NUM != pBlockHeader->refIdx)
+			{
+				++useBlockNum;
+			}
+
+			pCurrent += sizeof(BlockHeader) + pBlockHeader->size;
+		}
+
+		return useBlockNum;
+	}
 
 private:
 	bool m_dbgIsUseHeap;
@@ -620,10 +622,10 @@ private:
 };
 
 constexpr int THREAD_NUM = 10;
-void test(MemoryPool& pool, int& count, std::mutex& countMutex, bool& isEnd, bool isUseCompaction)
+void test(MemoryPool& pool, int& count, std::mutex& countMutex, bool& isEnd, bool isUseComp, int compNum)
 {
 	constexpr int INIT_NUM = 120 / THREAD_NUM;
-	constexpr int MAX_NUM = 150 / THREAD_NUM;
+	constexpr int MAX_NUM = 180 / THREAD_NUM;
 	std::array<MemoryPool::Handle<Test01>, MAX_NUM> test01Vec;
 	std::array<MemoryPool::Handle<Test02>, MAX_NUM> test02Vec;
 	std::array<MemoryPool::Handle<Test03>, MAX_NUM> test03Vec;
@@ -779,9 +781,9 @@ void test(MemoryPool& pool, int& count, std::mutex& countMutex, bool& isEnd, boo
 		{
 			std::lock_guard<std::mutex> lock(countMutex);
 
-			if (isUseCompaction)
+			if (isUseComp)
 			{
-				pool.Compaction(10);
+				pool.Compaction(compNum);
 			}
 
 			++count;
@@ -808,13 +810,15 @@ void out(MemoryPool& pool, int& count, bool& isEnd, clock_t start)
 
 		size_t freeByte = pool.GetFreeByte();
 		int freeBlockNum = pool.GetFreeBlockNum();
+		int useBlockNum = pool.GetUseBlockNum();
 
 		std::cout << "count: " << count << std::endl;
 		std::cout << "freeByte: " << freeByte << std::endl;
 		std::cout << "freeKB: " << freeByte / 1024 << std::endl;
 		std::cout << "freeMB: " << freeByte / 1024 / 1024 << std::endl;
 		std::cout << "freeBlock: " << freeBlockNum << std::endl;
-		std::cout << "time: " << (static_cast<double>(end - start) / static_cast<double>(count)) << std::endl;
+		std::cout << "useBlock: " << useBlockNum << std::endl;
+		std::cout << "time_ms: " << (static_cast<double>(end - start) / static_cast<double>(count)) << std::endl;
 
 
 		if (isEnd)
@@ -831,7 +835,8 @@ int main()
 #ifndef ALLOC_FREE_CHECK
 	MemoryPool pool;
 
-	constexpr bool isUseCompaction = true;
+	constexpr bool isUseComp = true;
+	constexpr int compNum = 80;
 	bool isEnd = false;
 	int count = 0;
 	std::mutex countMutex;
@@ -841,7 +846,7 @@ int main()
 	std::vector<std::thread> threadVec;
 	for (int i = 0; i < THREAD_NUM; ++i) 
 	{
-		threadVec.emplace_back(test, std::ref(pool), std::ref(count), std::ref(countMutex), std::ref(isEnd), isUseCompaction);
+		threadVec.emplace_back(test, std::ref(pool), std::ref(count), std::ref(countMutex), std::ref(isEnd), isUseComp, compNum);
 	}
 	threadVec.emplace_back(out, std::ref(pool), std::ref(count), std::ref(isEnd), start);
 
@@ -854,13 +859,15 @@ int main()
 
 	size_t freeByte = pool.GetFreeByte();
 	int freeBlockNum = pool.GetFreeBlockNum();
+	int useBlockNum = pool.GetUseBlockNum();
 
 	std::cout << "count: " << count << std::endl;
 	std::cout << "freeByte: " << freeByte << std::endl;
 	std::cout << "freeKB: " << freeByte / 1024 << std::endl;
 	std::cout << "freeMB: " << freeByte / 1024 / 1024 << std::endl;
 	std::cout << "freeBlock: " << freeBlockNum << std::endl;
-	std::cout << "time: " << (static_cast<double>(end - start) / static_cast<double>(count)) << std::endl;
+	std::cout << "useBlock: " << useBlockNum << std::endl;
+	std::cout << "time_ms: " << (static_cast<double>(end - start) / static_cast<double>(count)) << std::endl;
 
 	system("pause");
 #else
@@ -872,14 +879,3 @@ int main()
 
 #endif
 }
-
-// プログラムの実行: Ctrl + F5 または [デバッグ] > [デバッグなしで開始] メニュー
-// プログラムのデバッグ: F5 または [デバッグ] > [デバッグの開始] メニュー
-
-// 作業を開始するためのヒント: 
-//	1. ソリューション エクスプローラー ウィンドウを使用してファイルを追加/管理します 
-//   2. チーム エクスプローラー ウィンドウを使用してソース管理に接続します
-//   3. 出力ウィンドウを使用して、ビルド出力とその他のメッセージを表示します
-//   4. エラー一覧ウィンドウを使用してエラーを表示します
-//   5. [プロジェクト] > [新しい項目の追加] と移動して新しいコード ファイルを作成するか、[プロジェクト] > [既存の項目の追加] と移動して既存のコード ファイルをプロジェクトに追加します
-//   6. 後ほどこのプロジェクトを再び開く場合、[ファイル] > [開く] > [プロジェクト] と移動して .sln ファイルを選択します
